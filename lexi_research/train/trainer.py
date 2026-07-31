@@ -225,12 +225,15 @@ def train_sft(
     output_dir: str | Path,
     model: Any | None = None,
     tokenizer: Any | None = None,
+    run: Any | None = None,
 ) -> TrainResult:
     """Run supervised fine-tuning under `config`.
 
     `model` and `tokenizer` are injectable so the smoke gate can train a tiny
     randomly-initialised stack without a download; left unset, the checkpoint
-    named by `train.base_model` is loaded.
+    named by `train.base_model` is loaded. `run` is an open tracking handle —
+    when it is recording, the Trainer's own metrics go to the same run as the
+    lineage, rather than to a second one it opens for itself.
     """
     try:
         import torch
@@ -261,7 +264,7 @@ def train_sft(
     supervised = sum(example.supervised_tokens for example in examples)
     total = sum(len(example.input_ids) for example in examples)
     print(
-        f"data — {len(examples)} examples, {dropped} dropped, "
+        f"examples — {len(examples)} built, {dropped} dropped, "
         f"{supervised / total:.1%} of tokens supervised",
         flush=True,
     )
@@ -283,7 +286,7 @@ def train_sft(
         gradient_checkpointing=config.get_bool("train.gradient_checkpointing"),
         seed=config.get_int("train.seed"),
         bf16=bf16,
-        report_to=[],
+        report_to=["wandb"] if getattr(run, "active", False) else [],
     )
     pad_token_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
     trainer = transformers.Trainer(

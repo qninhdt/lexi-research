@@ -135,6 +135,19 @@ smoke:
   heads: 4
   kv_heads: 2
 
+# Run tracking. `mode: disabled` records nothing and imports nothing, which is
+# what CI runs — an offline path nobody exercises is an offline path that rots.
+# An `online` run with no WANDB_API_KEY falls back to disabled rather than
+# hanging in a login flow on a headless box.
+tracking:
+  project: lexi-research
+  entity: ""
+  group: ""
+  mode: online
+  # The adapter and band_config.json ship as one artifact under this name. A
+  # checkpoint without the config that derives its bands is meaningless.
+  adapter_artifact: lexi-grader-adapter
+
 eval:
   max_new_tokens: 256
   temperature: 0.0

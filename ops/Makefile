@@ -4,7 +4,7 @@
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
 
-.PHONY: smoke smoke-gpu lint test fixture
+.PHONY: smoke smoke-gpu lint test fixture notebook notebook-check repro dag
 
 # CPU, no network, no GPU: a randomly-initialised stack over the 50-row fixture.
 smoke:
@@ -29,3 +29,17 @@ test:
 # when the rows change.
 fixture:
 	cd $(ROOT) && uv run python ops/fixtures/build_smoke_fixture.py
+
+# The notebook is generated, never hand-edited: a cell that drifts from the CLI
+# fails on Colab after a GPU is already rented.
+notebook:
+	cd $(ROOT) && uv run python ops/build-notebook.py
+
+notebook-check:
+	cd $(ROOT) && uv run python ops/build-notebook.py --check
+
+repro:
+	cd $(ROOT) && uv run dvc repro $(STAGE)
+
+dag:
+	cd $(ROOT) && uv run dvc dag

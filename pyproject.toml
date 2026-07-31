@@ -68,6 +68,10 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Percent-format notebook source: it carries IPython `!` and `%` magics, so it is
+# not valid Python and is checked by `tests/ops/test_notebook_contract.py`
+# instead.
+extend-exclude = ["notebooks/lexi_colab.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -98,6 +102,7 @@ module = [
     "torch.*",
     "transformers.*",
     "trl.*",
+    "wandb.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

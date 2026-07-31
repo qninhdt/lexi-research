@@ -210,6 +210,81 @@ def check_masking_paths(rows: Sequence[Mapping[str, Any]]) -> str:
     return ", ".join(f"{label} {count} tokens" for label, count in counts.items())
 
 
+def check_data_stages(
+    config: Config, rows: Sequence[Mapping[str, Any]], workdir: Path
+) -> tuple[str, Path]:
+    """Run validate/balance/split and calibration over the fixture.
+
+    These stages are pure and cheap, and their failure modes are quiet: a
+    validator that rejects everything, a split that leaks a target word across
+    train and test, a calibration that collapses every row into one band. Running
+    them here is what stops those from being discovered against real data on a
+    rented GPU.
+
+    Returns the report line and the calibrated band config the run then trains
+    against.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from lexi_research.data.stages import run_calibrate, run_process
+
+    texts, labels = [], []
+    for index, row in enumerate(rows):
+        uid = f"smoke-{index:04d}"
+        texts.append(
+            {
+                "req_uid": uid,
+                "sense_uid": f"sense-{row['target']}",
+                "target": str(row["target"]),
+                # The split groups by target word, so it must be present and
+                # normalised the way the export stage normalises it.
+                "target_norm": str(row["target"]).lower(),
+                "pos": str(row["pos"]),
+                "definition": str(row["definition"]),
+                "text": str(row["text"]),
+                "error_spec": "none",
+            }
+        )
+        labels.append(
+            {
+                "req_uid": uid,
+                "correction": row["correction"],
+                "meaning": int(row["meaning"]),
+                "feedback": str(row["feedback"]),
+            }
+        )
+
+    raw = workdir / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(texts), raw / "raw_texts.parquet")
+    pq.write_table(pa.Table.from_pylist(labels), raw / "raw_labels.parquet")
+
+    clean = workdir / "clean"
+    processed = run_process(
+        config,
+        texts=raw / "raw_texts.parquet",
+        labels=raw / "raw_labels.parquet",
+        out=clean,
+    )
+    if not processed["clean_rows"]:
+        raise SmokeFailure("validation rejected every row of a fixture it should accept")
+
+    band_config = clean / "band_config.json"
+    calibrated = run_calibrate(config, rows_path=clean / "processed.parquet", out=band_config)
+    if len(set(calibrated["thresholds"])) < 2:
+        raise SmokeFailure(
+            f"calibration collapsed to {calibrated['thresholds']}, so every penalty "
+            "lands in one band"
+        )
+
+    return (
+        f"{processed['clean_rows']} clean, {processed['rejected_rows']} rejected, "
+        f"splits {processed['contamination']}, band config v{calibrated['version']}",
+        band_config,
+    )
+
+
 def run_smoke(config: Config, *, gpu: bool = False) -> int:
     """Run the gate. Returns 0 only if every stage that exists succeeded."""
     from lexi_research.train.trainer import load_rows, train_sft
@@ -223,34 +298,38 @@ def run_smoke(config: Config, *, gpu: bool = False) -> int:
     print(f"fixture — {check_fixture(rows)}", flush=True)
     print(f"masking — {check_masking_paths(rows)}", flush=True)
 
-    if gpu:
-        run_config = config.with_overrides(["train.epochs=1"])
-        model = tokenizer = None
-    else:
-        run_config = config.with_overrides(
-            [
-                f"train.max_steps={config.get_int('smoke.steps')}",
-                "train.load_in_4bit=false",
-                "train.gradient_checkpointing=false",
-                f"train.per_device_batch_size={min(2, len(rows))}",
-                "train.grad_accum=1",
-            ]
-        )
-        max_seq_len = run_config.get_int("train.max_seq_len")
-        tokenizer = build_tiny_tokenizer(rows, model_max_length=max_seq_len)
-        model = build_tiny_model(run_config, tokenizer, max_seq_len=max_seq_len)
+    with tempfile.TemporaryDirectory(prefix="lexi-smoke-") as tmp:
+        workdir = Path(tmp)
+        summary, _ = check_data_stages(config, rows, workdir)
+        print(f"data — {summary}", flush=True)
 
-    with tempfile.TemporaryDirectory(prefix="lexi-smoke-") as workdir:
+        if gpu:
+            run_config = config.with_overrides(["train.epochs=1"])
+            model = tokenizer = None
+        else:
+            run_config = config.with_overrides(
+                [
+                    f"train.max_steps={config.get_int('smoke.steps')}",
+                    "train.load_in_4bit=false",
+                    "train.gradient_checkpointing=false",
+                    f"train.per_device_batch_size={min(2, len(rows))}",
+                    "train.grad_accum=1",
+                ]
+            )
+            max_seq_len = run_config.get_int("train.max_seq_len")
+            tokenizer = build_tiny_tokenizer(rows, model_max_length=max_seq_len)
+            model = build_tiny_model(run_config, tokenizer, max_seq_len=max_seq_len)
+
         result = train_sft(
             run_config,
             train_path=fixture,
-            output_dir=Path(workdir) / "adapter",
+            output_dir=workdir / "adapter",
             model=model,
             tokenizer=tokenizer,
         )
         if result.steps < 1:
             raise SmokeFailure("training reported no optimiser steps")
-        if not (Path(workdir) / "adapter").exists():
+        if not (workdir / "adapter").exists():
             raise SmokeFailure("training saved no adapter")
         print(f"train — {result.summary()}", flush=True)
 

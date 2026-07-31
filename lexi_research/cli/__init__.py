@@ -44,6 +44,17 @@ def _common_options() -> argparse.ArgumentParser:
     return parser
 
 
+def _report(stage: str, config: Config, payload: dict[str, object]) -> int:
+    """Print a stage report and record it, with the lineage that dates it."""
+    from lexi_research.tracking import collect, start
+
+    run = start(config, stage=stage, lineage=collect(config.as_dict(), stage=stage))
+    run.summary(payload)
+    run.finish()
+    print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    return 0
+
+
 def _handle_data_export(config: Config, args: argparse.Namespace) -> int:
     from lexi_research.data.cli import main as export_main
 
@@ -59,10 +70,76 @@ def _handle_data_export(config: Config, args: argparse.Namespace) -> int:
     return export_main(argv)
 
 
+def _handle_data_sample(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_sample
+
+    return _report(
+        "sample", config, run_sample(config, pool=args.pool, out=args.out, full=args.full)
+    )
+
+
+def _handle_data_generate(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_generate
+
+    return _report(
+        "generate",
+        config,
+        run_generate(config, specs=args.specs, out=args.out, cache=args.cache),
+    )
+
+
+def _handle_data_label(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_label
+
+    return _report(
+        "label", config, run_label(config, texts=args.texts, out=args.out, cache=args.cache)
+    )
+
+
+def _handle_data_process(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_process
+
+    return _report(
+        "process",
+        config,
+        run_process(
+            config,
+            texts=args.texts,
+            labels=args.labels,
+            out=args.out,
+            band_config=args.band_config,
+        ),
+    )
+
+
+def _handle_data_calibrate(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_calibrate
+
+    return _report(
+        "calibrate",
+        config,
+        run_calibrate(config, rows_path=args.rows, out=args.out, band_config=args.band_config),
+    )
+
+
 def _handle_train_sft(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.tracking import collect, start
     from lexi_research.train.trainer import train_sft
 
-    result = train_sft(config, train_path=args.train, output_dir=args.output)
+    lineage = collect(config.as_dict(), stage="sft")
+    run = start(config, stage="sft", lineage=lineage)
+    try:
+        result = train_sft(config, train_path=args.train, output_dir=args.output, run=run)
+        # The adapter and the band config version together: a checkpoint without
+        # the config that derives its bands produces meaningless bands.
+        run.log_artifact(
+            config.get_str("tracking.adapter_artifact"),
+            [result.output_dir, args.band_config],
+            metadata={"lineage": lineage, "targets": result.targets.summary()},
+        )
+        run.summary({"examples": result.examples, "dropped": result.dropped})
+    finally:
+        run.finish()
     print(result.summary())
     return 0
 
@@ -95,12 +172,50 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--min-rows", type=int, default=1)
     export.set_defaults(handler=_handle_data_export)
 
+    sample = data.add_parser("sample", parents=[common], help="draw senses, build call-1 batches")
+    sample.add_argument("--pool", default="data/pool/senses_pool.parquet")
+    sample.add_argument("--out", default="data/batches")
+    sample.add_argument(
+        "--full", action="store_true", help="sample.full_senses instead of sample.pilot_senses"
+    )
+    sample.set_defaults(handler=_handle_data_sample)
+
+    generate = data.add_parser("generate", parents=[common], help="call 1: write sentences")
+    generate.add_argument("--specs", default="data/batches/batch_specs.parquet")
+    generate.add_argument("--out", default="data/raw")
+    generate.add_argument("--cache", default=".cache/teacher")
+    generate.set_defaults(handler=_handle_data_generate)
+
+    label = data.add_parser("label", parents=[common], help="call 2: grade sentences")
+    label.add_argument("--texts", default="data/raw/raw_texts.parquet")
+    label.add_argument("--out", default="data/raw")
+    label.add_argument("--cache", default=".cache/teacher")
+    label.set_defaults(handler=_handle_data_label)
+
+    process = data.add_parser(
+        "process", parents=[common], help="validate, balance and split in one pass"
+    )
+    process.add_argument("--texts", default="data/raw/raw_texts.parquet")
+    process.add_argument("--labels", default="data/raw/raw_labels.parquet")
+    process.add_argument("--out", default="data/clean")
+    process.add_argument("--band-config", default=None)
+    process.set_defaults(handler=_handle_data_process)
+
+    calibrate = data.add_parser(
+        "calibrate", parents=[common], help="place band cut points on the real distribution"
+    )
+    calibrate.add_argument("--rows", default="data/clean/train.parquet")
+    calibrate.add_argument("--out", default="band_config.json")
+    calibrate.add_argument("--band-config", default=None)
+    calibrate.set_defaults(handler=_handle_data_calibrate)
+
     train = groups.add_parser("train", help="training stages").add_subparsers(
         dest="command", required=True
     )
     sft = train.add_parser("sft", parents=[common], help="supervised fine-tuning")
     sft.add_argument("--train", required=True, help="parquet or jsonl training rows")
     sft.add_argument("--output", required=True, help="adapter output directory")
+    sft.add_argument("--band-config", default="band_config.json")
     sft.set_defaults(handler=_handle_train_sft)
     rl = train.add_parser("rl", parents=[common], help="GRPO / JEPO / NRT")
     rl.add_argument("--variant", default="grpo", choices=["grpo", "jepo", "nrt"])
