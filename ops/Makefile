@@ -25,10 +25,11 @@ lint:
 test:
 	cd $(ROOT) && uv run pytest -q
 
-# Rebuild the fixture from its source rows; it is committed, so this only runs
-# when the rows change.
+# Rebuild the fixtures from their source rows; both are committed, so this only
+# runs when the rows change.
 fixture:
 	cd $(ROOT) && uv run python ops/fixtures/build_smoke_fixture.py
+	cd $(ROOT) && uv run python ops/fixtures/build_eval_fixture.py
 
 # The notebook is generated, never hand-edited: a cell that drifts from the CLI
 # fails on Colab after a GPU is already rented.

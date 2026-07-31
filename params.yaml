@@ -151,3 +151,12 @@ tracking:
 eval:
   max_new_tokens: 256
   temperature: 0.0
+  # One retry on an invalid answer. The count lands in the report: a student that
+  # needs two attempts is a different product than one that needs none.
+  max_retries: 1
+  # Equal-mass, not equal-width. The band distribution is skewed by design, so
+  # equal-width bins would leave several nearly empty and ECE would be noise.
+  calibration_bins: 10
+  # Pairs sampled for the teacher-as-judge feedback comparison. Both orders of
+  # each pair are presented, so this costs twice as many calls.
+  judge_sample: 100

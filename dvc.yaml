@@ -165,3 +165,44 @@ stages:
       - tracking
     outs:
       - runs/sft/adapter
+
+  predict:
+    # The only step here that needs a GPU. Split from scoring so a metric fix
+    # never costs a re-run of the model.
+    cmd: >-
+      uv run lexi eval predict
+      --rows data/clean/test.parquet
+      --adapter runs/sft/adapter
+      --band-config data/clean/band_config.json
+      --out reports/predictions-sft.jsonl
+    deps:
+      - data/clean/test.parquet
+      - data/clean/band_config.json
+      - runs/sft/adapter
+      - lexi_research/eval/predict.py
+    params:
+      - eval
+    outs:
+      - reports/predictions-sft.jsonl
+
+  eval:
+    cmd: >-
+      uv run lexi eval score
+      --predictions reports/predictions-sft.jsonl
+      --ceiling reports/pilot-ceiling.json
+      --band-config data/clean/band_config.json
+      --split test
+      --out reports/eval-sft.json
+    deps:
+      - reports/predictions-sft.jsonl
+      - reports/pilot-ceiling.json
+      - data/clean/band_config.json
+      - lexi_research/eval/harness.py
+      - lexi_research/eval/correction.py
+      - lexi_research/eval/calibration.py
+      - lexi_research/eval/report.py
+    params:
+      - eval
+    metrics:
+      - reports/eval-sft.json:
+          cache: false

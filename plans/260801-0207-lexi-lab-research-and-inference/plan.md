@@ -48,7 +48,7 @@ number. Scope decisions are made against that goal, not against a product.
 |---|---|---|---|---|
 | 0 | [CLI surface and trainer rewrite](phase-00-cli-surface-and-trainer-rewrite.md) | — | `lexi` entry point, model-agnostic trainer, 50-row fixture, `lexi smoke` green on CPU | done |
 | 1 | [DVC pipeline and MLOps spine](phase-01-dvc-pipeline-and-mlops-spine.md) | 0 | all stages wired, W&B lineage, Colab notebook, CI smoke job | done |
-| 2 | [Eval harness and W&B panels](phase-02-eval-harness-and-wandb-panels.md) | 1 | full metric suite, teacher-as-judge, custom panels | pending |
+| 2 | [Eval harness and W&B panels](phase-02-eval-harness-and-wandb-panels.md) | 1 | full metric suite, teacher-as-judge, custom panels | done |
 | 3 | [SFT and architecture ablations](phase-03-sft-and-architecture-ablations.md) | 2 | first real adapter; A2, A6, A7 | pending |
 | 4 | [RL — GRPO, JEPO, NRT](phase-04-rl-grpo-jepo-nrt.md) | 3 | three trainers on one mask; A1, A3, A4 | pending |
 | 5 | [Inference lab](phase-05-inference-lab.md) | 2 | engine adapters, bench harness, B1–B7 | pending |

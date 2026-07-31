@@ -122,6 +122,60 @@ def _handle_data_calibrate(config: Config, args: argparse.Namespace) -> int:
     )
 
 
+def _handle_eval_predict(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.eval.harness import iter_rows, write_predictions
+    from lexi_research.eval.predict import load_for_inference, predict_rows
+    from lexi_research.format import BandConfig
+
+    model, tokenizer = load_for_inference(config, args.adapter)
+    rows = list(iter_rows(args.rows))
+    predictions = predict_rows(
+        config,
+        rows,
+        model=model,
+        tokenizer=tokenizer,
+        band_config=BandConfig.from_json(args.band_config),
+        max_retries=config.get_int("eval.max_retries"),
+    )
+    path = write_predictions(predictions, args.out)
+    print(f"wrote {len(predictions)} predictions to {path}")
+    return 0
+
+
+def _handle_eval_score(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.eval.harness import load_ceiling, read_predictions, score
+    from lexi_research.format import BandConfig
+    from lexi_research.tracking import collect, start
+    from lexi_research.tracking.panels import log_confusion, log_qualitative
+
+    lineage = collect(config.as_dict(), stage="eval")
+    rows = read_predictions(args.predictions)
+    report = score(
+        rows,
+        stage="eval",
+        split=args.split,
+        lineage=lineage,
+        ceiling=load_ceiling(args.ceiling),
+        band_config=BandConfig.from_json(args.band_config),
+        calibration_bins=config.get_int("eval.calibration_bins"),
+    )
+    written = report.write(args.out)
+
+    run = start(config, stage="eval", lineage=lineage)
+    try:
+        run.summary(report.flat())
+        log_qualitative(run, rows)
+        confusion = report.groups["correction"].get("confusion")
+        if isinstance(confusion, dict):
+            log_confusion(run, confusion)
+    finally:
+        run.finish()
+
+    print(report.markdown())
+    print(f"wrote {written}")
+    return 0
+
+
 def _handle_train_sft(config: Config, args: argparse.Namespace) -> int:
     from lexi_research.tracking import collect, start
     from lexi_research.train.trainer import train_sft
@@ -224,9 +278,28 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = groups.add_parser("eval", help="evaluation stages").add_subparsers(
         dest="command", required=True
     )
-    evaluate.add_parser("run", parents=[common], help="metric harness").set_defaults(
-        handler=_not_yet(2, "the eval harness")
+    predict = evaluate.add_parser(
+        "predict", parents=[common], help="generate predictions (the only GPU step)"
     )
+    predict.add_argument("--rows", default="data/clean/test.parquet")
+    predict.add_argument("--adapter", default=None)
+    predict.add_argument("--out", default="reports/predictions.jsonl")
+    predict.add_argument("--band-config", default="data/clean/band_config.json")
+    predict.set_defaults(handler=_handle_eval_predict)
+
+    score = evaluate.add_parser(
+        "score", parents=[common], help="score a predictions file (CPU only)"
+    )
+    score.add_argument("--predictions", default="reports/predictions.jsonl")
+    score.add_argument("--split", default="test")
+    score.add_argument("--out", default="reports/eval.json")
+    score.add_argument("--band-config", default="data/clean/band_config.json")
+    score.add_argument(
+        "--ceiling",
+        default=None,
+        help="teacher self-consistency artifact; every metric is normalised by it",
+    )
+    score.set_defaults(handler=_handle_eval_score)
 
     bench = groups.add_parser("bench", help="inference benchmarks").add_subparsers(
         dest="command", required=True
