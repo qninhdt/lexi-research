@@ -1,7 +1,7 @@
 ---
 title: "Lexi Lab — research and inference"
 description: "Turn lexi-research into a complete lab: a full CLI surface, a model-agnostic QLoRA trainer, three RL tracks (GRPO/JEPO/NRT) sharing one reward mask, a metric harness with W&B panels, and an inference benchmark across engines, quantisations and speculative decoding."
-status: in-progress
+status: code-complete, experiments blocked on hardware
 priority: P1
 size: L
 tags: [ml, distillation, rl, grpo, jepo, nrt, inference, vllm, mlops]
@@ -61,6 +61,16 @@ Colab while benchmarking on the rented GPU.
 0 ── 1 ── 2 ─┬─ 3 ── 4 ─┬─ 6
              └─ 5 ──────┘
 ```
+
+## Where this landed
+
+Every phase's code is written, tested and committed. `lexi smoke` runs the data
+stages, both label-masking paths, an SFT run and all three RL tracks over a
+synthetic 50-row fixture on CPU with no network, and exits 0.
+
+No experimental result exists. A1–A8 and B1–B8 each need a GPU, and the data
+stages that reach a teacher endpoint need credentials and budget. Every findings
+report says so on every row rather than leaving blanks that read as zeros.
 
 ## Acceptance criteria for the plan as a whole
 
