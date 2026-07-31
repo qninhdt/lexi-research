@@ -273,6 +273,30 @@ def _handle_train_sweep(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_train_rl(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.format import BandConfig
+    from lexi_research.rl.trainer import train_rl
+    from lexi_research.tracking import collect, start
+
+    run_config = config.with_overrides([f"rl.algo={args.algo}"]) if args.algo else config
+    stage = f"rl-{run_config.get_str('rl.algo')}"
+    lineage = collect(run_config.as_dict(), stage=stage)
+    run = start(run_config, stage=stage, lineage=lineage)
+    try:
+        result = train_rl(
+            run_config,
+            train_path=args.train,
+            output_dir=args.output,
+            band_config=BandConfig.from_json(args.band_config),
+            run=run,
+        )
+        run.summary(result.last.as_dict())
+    finally:
+        run.finish()
+    print(result.summary())
+    return 0
+
+
 def _handle_smoke(config: Config, args: argparse.Namespace) -> int:
     from .smoke import run_smoke
 
@@ -364,8 +388,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sweep.set_defaults(handler=_handle_train_sweep)
     rl = train.add_parser("rl", parents=[common], help="GRPO / JEPO / NRT")
-    rl.add_argument("--variant", default="grpo", choices=["grpo", "jepo", "nrt"])
-    rl.set_defaults(handler=_not_yet(4, "RL training"))
+    rl.add_argument("--algo", default=None, choices=["grpo", "jepo", "nrt"])
+    rl.add_argument("--train", required=True)
+    rl.add_argument("--output", default="runs/rl/adapter")
+    rl.add_argument("--band-config", default="band_config.json")
+    rl.set_defaults(handler=_handle_train_rl)
 
     evaluate = groups.add_parser("eval", help="evaluation stages").add_subparsers(
         dest="command", required=True

@@ -1,0 +1,25 @@
+# A1 — method. The headline axis, and the one most likely to return a null
+# result: RL beating SFT on ~20k rows of distillation data is not the default
+# expectation. That is acceptable only because Phase 2 built the harness first;
+# a null result from a trusted harness is presentable, and one from an
+# unvalidated harness is indistinguishable from a bug.
+key: a1
+question: Does RL beat SFT here, and if so which variant?
+arms:
+  - name: a1-sft
+    overrides:
+      train.epochs: 2
+  - name: a1-grpo
+    overrides:
+      rl.algo: grpo
+  - name: a1-jepo
+    overrides:
+      rl.algo: jepo
+  - name: a1-nrt-geo
+    overrides:
+      rl.algo: nrt
+      rl.nrt_aggregation: geo_mean
+  - name: a1-nrt-wlogp
+    overrides:
+      rl.algo: nrt
+      rl.nrt_aggregation: weighted_neglogp

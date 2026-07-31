@@ -333,8 +333,51 @@ def run_smoke(config: Config, *, gpu: bool = False) -> int:
             raise SmokeFailure("training saved no adapter")
         print(f"train — {result.summary()}", flush=True)
 
+        if not gpu:
+            print(f"rl — {check_rl_tracks(run_config, model, tokenizer, workdir)}", flush=True)
+
     print("smoke — ok", flush=True)
     return 0
+
+
+def check_rl_tracks(config: Config, model: Any, tokenizer: Any, workdir: Path) -> str:
+    """Two steps of every RL track, on the same tiny model.
+
+    All three share one loop and differ only in `compute_reward`, so running all
+    three here is what keeps that true: a change that breaks the shared mask, the
+    baseline, or the advantage normalisation fails on the CPU gate rather than
+    after a GPU is rented.
+    """
+    from lexi_research.format import BandConfig, default_config_path
+    from lexi_research.rl.base import ALGORITHMS
+    from lexi_research.rl.trainer import train_rl
+
+    band_config = BandConfig.from_json(default_config_path())
+    summaries = []
+    for algorithm in ALGORITHMS:
+        run_config = config.with_overrides(
+            [
+                f"rl.algo={algorithm}",
+                "rl.group_size=2",
+                "rl.max_reasoning_tokens=8",
+                "eval.max_new_tokens=8",
+            ]
+        )
+        result = train_rl(
+            run_config,
+            train_path=config.get_str("smoke.fixture"),
+            output_dir=workdir / f"rl-{algorithm}",
+            band_config=band_config,
+            model=model,
+            tokenizer=tokenizer,
+            max_steps=config.get_int("smoke.steps"),
+        )
+        if result.steps < 1:
+            raise SmokeFailure(f"{algorithm} reported no optimiser steps")
+        if not result.rollouts:
+            raise SmokeFailure(f"{algorithm} sampled no rollouts")
+        summaries.append(f"{algorithm} {result.steps} steps/{result.rollouts} rollouts")
+    return ", ".join(summaries)
 
 
 __all__ = [

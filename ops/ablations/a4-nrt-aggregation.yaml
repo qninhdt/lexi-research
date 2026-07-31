@@ -1,0 +1,10 @@
+# A4 — NRT aggregation. Reproduces the source paper's ablation on a new domain.
+#
+# `seq_logp` is exactly single-sample JEPO, which is asserted by a test rather
+# than by this comment; including it here means A1 and A4 meet at a known point
+# and a disagreement between them is a bug rather than a finding.
+key: a4
+question: Which aggregation of gold-token probabilities makes the best reward?
+grid:
+  rl.algo: [nrt]
+  rl.nrt_aggregation: [seq_logp, geo_mean, arith_mean, weighted_neglogp]

@@ -166,7 +166,7 @@ def per_band(predicted: Sequence[int], gold: Sequence[int]) -> dict[str, Any]:
     return out
 
 
-def _chrf(prediction: str, reference: str, order: int = 6) -> float:
+def chrf(prediction: str, reference: str, order: int = 6) -> float:
     """Character n-gram F-score. A weak proxy, tagged as one wherever it appears."""
     scores = []
     for n in range(1, order + 1):
@@ -196,7 +196,7 @@ def feedback_metrics(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         predicted = prediction.get("feedback")
         reference = row["gold"].get("feedback")
         if isinstance(predicted, str) and isinstance(reference, str):
-            scores.append(_chrf(predicted, reference))
+            scores.append(chrf(predicted, reference))
     return {"chrf": sum(scores) / len(scores) if scores else 0.0, "n": len(scores)}
 
 
@@ -304,6 +304,7 @@ def iter_rows(path: str | Path) -> Iterator[dict[str, Any]]:
 __all__ = [
     "REQUIRED_FIELDS",
     "HarnessError",
+    "chrf",
     "feedback_metrics",
     "format_metrics",
     "iter_rows",

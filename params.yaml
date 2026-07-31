@@ -156,6 +156,44 @@ tracking:
   # checkpoint without the config that derives its bands is meaningless.
   adapter_artifact: lexi-grader-adapter
 
+# Reinforcement learning. All three tracks share this section; they differ only
+# in how R(z) is defined, which is what makes a comparison between them a
+# comparison of reward definitions rather than of trainers.
+rl:
+  # `grpo` | `jepo` | `nrt`. Order is not negotiable: GRPO's reward is exogenous,
+  # so when a curve misbehaves the cause is the trainer or the data. JEPO and NRT
+  # rewards are functions of theta, and a rising reward there can mean the model
+  # became more confident rather than more correct.
+  algo: grpo
+  # Rollouts sampled per prompt. The group is what advantages are relative to, so
+  # a group of one carries no signal at all.
+  group_size: 4
+  # Weight on the RL term in `CE + lambda * L_RL`. Swept on the 50-row fixture
+  # before any full run, per track: there is no reason the three should agree.
+  lambda_rl: 0.1
+  # Logged every step, never optimised. An endogenous reward can rise while the
+  # policy walks away from anything the reference would recognise.
+  kl_coefficient: 0.0
+  # Ablation A3. `full_answer` adds feedback to the reward, which the design
+  # argues teaches the model to chase teacher phrasing; this arm tests that.
+  reward_scope: correction_meaning
+  # Ablation A4, NRT only.
+  nrt_aggregation: geo_mean
+  # `max(0, R(z) - R(empty))`. Mandatory for JEPO and NRT, and the primary
+  # diagnostic for both: a gap that collapses to zero means reasoning stopped
+  # contributing, whatever the reward curve says.
+  empty_baseline: true
+  max_reasoning_tokens: 256
+  temperature: 1.0
+  reward_weights:
+    edit_f1: 0.5
+    meaning: 0.3
+    format_valid: 0.2
+    # Above the whole positive total on purpose: at 0.5 an otherwise-perfect
+    # answer that quietly rewrote unmarked text still scored positive, which
+    # makes the behaviour worth producing.
+    strip_mismatch: 1.0
+
 eval:
   max_new_tokens: 256
   temperature: 0.0

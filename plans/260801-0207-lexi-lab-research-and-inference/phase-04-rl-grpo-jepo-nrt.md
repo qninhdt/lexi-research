@@ -1,7 +1,7 @@
 ---
 phase: 4
 title: "RL — GRPO, JEPO, NRT"
-status: pending
+status: blocked-on-hardware
 priority: P1
 size: L
 dependencies: [3]
@@ -148,13 +148,27 @@ in both, identically, to pass.
 
 ## Acceptance
 
-- All three algorithms complete 2 steps in `lexi smoke` on CPU.
-- A1, A3, A4 complete, each a W&B group.
-- Every RL run logs the `R(empty)` gap and KL to reference.
-- `test_nrt_seqlogp_equals_jepo` passes.
-- Findings written to `plans/…/reports/phase-04-findings.md` — **including a null
-  result if that is what happens**, with the ceiling-normalised numbers that make
-  it interpretable.
+Implementation — done and exercised on CPU:
+
+- [x] All three algorithms complete 2 steps in `lexi smoke` on CPU, on the same
+      tiny model, through one shared loop.
+- [x] Every RL run logs the `R(empty)` gap and KL to reference, alongside the
+      rest of the design §5 health panel.
+- [x] `test_nrt_seqlogp_equals_jepo` passes, at every length and with a floored
+      zero probability.
+- [x] `--override rl.reward_scope=…` switches A3; `--override
+      rl.nrt_aggregation=…` switches A4. Both are config, not code.
+- [x] Rewards are computed by the same `format` primitives the eval harness uses
+      — asserted by a test that reads the source for a reimplementation.
+- [x] `uv run pytest` green — 697.
+
+Experiments — blocked on a GPU, a trained SFT baseline, and a real dataset:
+
+- [ ] The `lambda` sweep on the fixture, per track.
+- [ ] A1, A3, A4 complete, each a W&B group.
+- [ ] Findings filled in at `plans/…/reports/phase-04-findings.md`, **including a
+      null result if that is what happens**. The file currently records what the
+      CPU gate shows and marks every experimental row pending.
 
 ## Risks
 
