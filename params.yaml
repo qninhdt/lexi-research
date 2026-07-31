@@ -156,6 +156,27 @@ tracking:
   # checkpoint without the config that derives its bands is meaningless.
   adapter_artifact: lexi-grader-adapter
 
+# The inference lab. VRAM is a parameter, never an assumption: any arm that
+# only works on one card is a defect in the harness rather than a fact about the
+# hardware.
+bench:
+  engine: hf
+  # Open-loop arrival rate, per concurrency level. Requests are issued on a fixed
+  # schedule, not after the previous response — a closed-loop generator with a
+  # fixed worker count silently backs off as the server slows and never shows a
+  # saturation knee.
+  concurrency: [1, 4, 16, 64, 128]
+  duration_s: 60
+  warmup_requests: 20
+  # Goodput is measured against this. Throughput counts work done; goodput counts
+  # work that arrived in time to be useful.
+  slo_s: 2.0
+  # For cost per 1000 requests. Zero means unknown, which reports as absent
+  # rather than as free.
+  cost_per_hour: 0.0
+  quantisations: [bf16, fp8, awq, gptq]
+  repeat_runs: 2
+
 # Reinforcement learning. All three tracks share this section; they differ only
 # in how R(z) is defined, which is what makes a comparison between them a
 # comparison of reward definitions rather than of trainers.

@@ -210,3 +210,24 @@ stages:
     metrics:
       - reports/eval-sft.json:
           cache: false
+
+  bench:
+    # Latency and quality are never reported apart: a quantisation that gains 40%
+    # throughput while losing 0.1 QWK is a decision, not a win.
+    cmd: >-
+      uv run lexi bench run
+      --engine hf
+      --adapter runs/sft/adapter
+      --rows data/clean/test.parquet
+      --out reports/bench-sft.json
+    deps:
+      - data/clean/test.parquet
+      - runs/sft/adapter
+      - bench/runner.py
+      - bench/engines/base.py
+      - bench/engines/hf.py
+    params:
+      - bench
+    metrics:
+      - reports/bench-sft.json:
+          cache: false

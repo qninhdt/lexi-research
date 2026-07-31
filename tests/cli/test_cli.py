@@ -68,15 +68,32 @@ def test_an_unknown_override_is_rejected_before_anything_runs() -> None:
     assert excinfo.value.code == 2
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [["eval", "run"], ["bench", "run"], ["serve", "up"], ["train", "rl"]],
-    ids=["eval", "bench", "serve", "rl"],
-)
+@pytest.mark.parametrize("argv", [["serve", "up"]], ids=["serve"])
 def test_commands_from_later_phases_exit_non_zero(argv) -> None:
+    """A stub cannot make the gate pass: `lexi smoke` chains stages."""
     with pytest.raises(SystemExit) as excinfo:
         main(argv)
     assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["eval", "score"],
+        ["eval", "predict"],
+        ["bench", "run"],
+        ["train", "rl", "--train", FIXTURE],
+    ],
+    ids=["score", "predict", "bench", "rl"],
+)
+def test_implemented_commands_resolve_their_config_without_running(argv, capsys) -> None:
+    """`--print-config` must not reach a handler.
+
+    Not a style point: without it these would load a checkpoint, and a test suite
+    that downloads four gigabytes is a test suite nobody runs.
+    """
+    assert main([*argv, "--print-config"]) == 0
+    assert json.loads(capsys.readouterr().out)["train"]["base_model"]
 
 
 def test_print_config_runs_no_stage(capsys) -> None:

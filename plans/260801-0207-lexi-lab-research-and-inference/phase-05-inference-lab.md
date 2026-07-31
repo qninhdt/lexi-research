@@ -1,7 +1,7 @@
 ---
 phase: 5
 title: "Inference lab"
-status: pending
+status: blocked-on-hardware
 priority: P1
 size: L
 dependencies: [2]
@@ -125,13 +125,27 @@ rate. Constrained decoding should drive it to 1.0; the question is what it costs
 
 ## Acceptance
 
-- All three engines serve the adapter behind the unchanged shim contract.
-- B1–B7 complete on the rented GPU, or are explicitly recorded as skipped with a
-  reason.
-- A Pareto plot of quality against latency across B2 arms, with the frontier drawn.
-- `lexi bench run` reproduces its own numbers within noise on a repeat run, and
-  the report states the observed run-to-run variance.
-- Findings in `plans/…/reports/phase-05-findings.md`.
+Harness — done and tested on CPU:
+
+- [x] One engine interface with capability flags; an unsupported arm is reported
+      as skipped with its reason rather than crashing or silently falling back.
+- [x] Open-loop load generation, asserted by a test to be independent of response
+      latency.
+- [x] Percentiles from raw samples, hand-checked; warm-up discarded and counted.
+- [x] TTFT and TPOT reported separately from end-to-end, and goodput separately
+      from throughput.
+- [x] Pareto frontier computed, hand-checked on a known set.
+- [x] Run-to-run variance reported rather than hidden.
+- [x] The shim contract is unchanged: `tests/serve/` passes against the engine
+      backend.
+- [x] `lexi bench run` writes a report with lineage, and `dvc.yaml` has the stage.
+
+Sweeps — blocked on a rented GPU and two nightly engine builds:
+
+- [ ] B1–B7 complete, or explicitly recorded as skipped with a reason.
+- [ ] A Pareto plot of quality against latency across the B2 arms.
+- [ ] A repeat run inside noise, with the observed variance stated.
+- [ ] Findings filled in at `plans/…/reports/phase-05-findings.md`.
 
 ## Risks
 

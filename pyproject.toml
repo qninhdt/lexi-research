@@ -79,7 +79,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["lexi_research"]
+files = ["lexi_research", "bench", "serve"]
 
 # pyarrow ships neither stubs nor a py.typed marker. Untyped is the upstream
 # state, not something this repo can fix, so the import is allowed through

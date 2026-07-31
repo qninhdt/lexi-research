@@ -297,6 +297,159 @@ def _handle_train_rl(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_bench_run(config: Config, args: argparse.Namespace) -> int:
+    """Benchmark one engine across concurrency levels, and skip loudly."""
+    import json as _json
+
+    from bench.engines import build as build_engine
+    from bench.engines import skip_reason
+    from bench.runner import BenchResult
+    from lexi_research.tracking import collect, start
+
+    name = args.engine or config.get_str("bench.engine")
+    engine = build_engine(name, config.get_str("train.base_model"), args.adapter)
+    reason = skip_reason(engine.capabilities(), quantisation=args.quantisation, features=())
+
+    levels = (
+        [int(value) for value in args.concurrency.split(",")]
+        if args.concurrency
+        else [int(value) for value in config.get("bench.concurrency")]
+    )
+    lineage = collect(config.as_dict(), stage=f"bench-{name}")
+    run = start(config, stage=f"bench-{name}", lineage=lineage)
+    results = []
+    try:
+        for level in levels:
+            result = BenchResult(
+                engine=name,
+                quantisation=args.quantisation,
+                concurrency=level,
+                skipped=reason,
+                lineage=lineage,
+                cost_per_hour=config.get_float("bench.cost_per_hour"),
+            )
+            if reason is None:
+                result.samples = _bench_arm(config, engine, args, level)
+            payload = result.statistics(slo_s=config.get_float("bench.slo_s"))
+            results.append({"concurrency": level, **payload})
+            run.log(
+                {
+                    f"bench/{key}": value
+                    for key, value in payload.items()
+                    if isinstance(value, (int, float))
+                }
+            )
+    finally:
+        run.finish()
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        _json.dumps(
+            {
+                "engine": name,
+                "quantisation": args.quantisation,
+                "lineage": lineage,
+                "arms": results,
+            },
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(_json.dumps(results, indent=2, default=str))
+    if reason:
+        print(f"skipped: {reason}")
+    print(f"wrote {out}")
+    return 0
+
+
+def _bench_arm(config: Config, engine: Any, args: argparse.Namespace, level: int) -> list[Any]:
+    """Issue the schedule against a launched engine and time every response."""
+    import time
+
+    from bench.runner import Sample, arrival_schedule
+    from lexi_research.eval.harness import iter_rows
+
+    launched = engine.launch(quantisation=args.quantisation)
+    rows = list(iter_rows(args.rows))
+    if not rows:
+        raise RuntimeError(f"{args.rows} holds no rows to benchmark against")
+    duration = args.duration if args.duration is not None else config.get_float("bench.duration_s")
+    schedule = arrival_schedule(
+        rate_per_s=level,
+        duration_s=duration,
+        warmup=config.get_int("bench.warmup_requests"),
+    )
+    warmups = config.get_int("bench.warmup_requests")
+
+    samples: list[Sample] = []
+    origin = time.monotonic()
+    try:
+        for index, offset in enumerate(schedule):
+            # Open loop: sleep until this request's scheduled instant rather than
+            # until the previous response arrived.
+            delay = origin + offset - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            started = time.monotonic()
+            tokens, ttft = _one_request(engine, launched, rows[index % len(rows)], config)
+            samples.append(
+                Sample(
+                    started_s=started - origin,
+                    ttft_s=ttft,
+                    latency_s=time.monotonic() - started,
+                    output_tokens=tokens,
+                    warmup=index < warmups,
+                )
+            )
+    finally:
+        engine.shutdown()
+    return samples
+
+
+def _one_request(engine: Any, launched: Any, row: Any, config: Config) -> tuple[int, float]:
+    """One graded request. In-process for the baseline, HTTP for a served engine."""
+    import time
+
+    from lexi_research.train.collate import training_messages
+
+    started = time.monotonic()
+    if launched.base_url.startswith("inprocess://"):
+        import torch
+
+        prompt = engine.tokenizer.apply_chat_template(
+            training_messages(row), tokenize=True, add_generation_prompt=True, return_tensors="pt"
+        ).to(engine.model.device)
+        with torch.no_grad():
+            generated = engine.model.generate(
+                prompt,
+                max_new_tokens=config.get_int("eval.max_new_tokens"),
+                do_sample=False,
+                pad_token_id=engine.tokenizer.pad_token_id,
+            )
+        return int(generated.shape[-1] - prompt.shape[-1]), time.monotonic() - started
+
+    import httpx
+
+    response = httpx.post(
+        f"{launched.base_url}/chat/completions",
+        json={
+            "model": "lexi",
+            "messages": training_messages(row),
+            "temperature": 0,
+            "max_tokens": config.get_int("eval.max_new_tokens"),
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    tokens = int(payload.get("usage", {}).get("completion_tokens", 0))
+    return tokens, time.monotonic() - started
+
+
 def _handle_smoke(config: Config, args: argparse.Namespace) -> int:
     from .smoke import run_smoke
 
@@ -423,9 +576,15 @@ def build_parser() -> argparse.ArgumentParser:
     bench = groups.add_parser("bench", help="inference benchmarks").add_subparsers(
         dest="command", required=True
     )
-    bench.add_parser("run", parents=[common], help="latency and throughput").set_defaults(
-        handler=_not_yet(5, "the bench harness")
-    )
+    bench_run = bench.add_parser("run", parents=[common], help="latency and throughput")
+    bench_run.add_argument("--engine", default=None, choices=["hf", "vllm", "sglang"])
+    bench_run.add_argument("--adapter", default=None)
+    bench_run.add_argument("--rows", default="data/clean/test.parquet")
+    bench_run.add_argument("--quantisation", default="bf16")
+    bench_run.add_argument("--concurrency", default=None, help="comma-separated arrival rates")
+    bench_run.add_argument("--duration", type=float, default=None)
+    bench_run.add_argument("--out", default="reports/bench.json")
+    bench_run.set_defaults(handler=_handle_bench_run)
 
     serve = groups.add_parser("serve", help="the grading shim").add_subparsers(
         dest="command", required=True
