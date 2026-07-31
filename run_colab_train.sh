@@ -54,10 +54,10 @@ os.chdir("/content/lexi-research")
 os.environ["WANDB_DISABLED"] = "true"
 
 cmd = [
-    sys.executable, "-m", "lexi_research.train.cli",
-    "--train", "data/sample_train.parquet",
+    sys.executable, "-m", "lexi_research.cli", "train", "sft",
+    "--train", "ops/fixtures/smoke_50.jsonl",
     "--output", "models/smoke_test",
-    "--epochs", "1",
+    "--override", "train.epochs=1",
 ]
 print(f">>> {' '.join(cmd)}")
 result = subprocess.run(cmd)

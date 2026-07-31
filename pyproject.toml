@@ -15,8 +15,12 @@ dependencies = [
     "openai>=1.60",
     "pyarrow>=17",
     "pydantic>=2.9",
+    "pyyaml>=6",
     "uvicorn>=0.30",
 ]
+
+[project.scripts]
+lexi = "lexi_research.cli:main"
 
 [dependency-groups]
 dev = [
@@ -25,7 +29,29 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.9",
     "mypy>=1.11",
+    "types-PyYAML>=6",
 ]
+# The CPU training stack, for `make smoke` and the CI smoke job only. Not in
+# `dev`, so the fast format-core checks never pay for it. GPU runtimes install
+# `requirements-colab.txt` instead, which adds bitsandbytes and a CUDA torch.
+smoke = [
+    "accelerate>=1.0",
+    "datasets>=3",
+    "peft>=0.13",
+    "torch>=2.4",
+    "transformers>=4.57",
+    "trl>=0.12",
+]
+
+[tool.uv.sources]
+# Pin torch to the CPU wheels: this group exists to run two optimiser steps on a
+# tiny model, and the default index would pull ~2.5 GB of CUDA for nothing.
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["uv_build>=0.10.7,<0.11.0"]
@@ -57,3 +83,21 @@ files = ["lexi_research"]
 [[tool.mypy.overrides]]
 module = ["pyarrow.*"]
 ignore_missing_imports = true
+
+# The training stack is imported lazily and is absent from the CPU environment
+# CI type-checks in. Skipping it keeps one mypy result whether or not the
+# `smoke` group is installed — otherwise every lazy import would need an inline
+# ignore that becomes an error the moment someone installs the group.
+[[tool.mypy.overrides]]
+module = [
+    "accelerate.*",
+    "bitsandbytes.*",
+    "datasets.*",
+    "peft.*",
+    "tokenizers.*",
+    "torch.*",
+    "transformers.*",
+    "trl.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"

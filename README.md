@@ -64,6 +64,27 @@ The source export is reproducible without teacher credentials:
 LEXI_SOURCE_DB=/absolute/path/to/lexi-ai/data uv run dvc repro export
 ```
 
+Every stage is a `lexi` subcommand, and an experiment changes an arm through
+`--override` rather than an edit:
+
+```bash
+uv run lexi train sft --train data/processed/train.parquet --output models/sft \
+  --override train.lora_r=64 --override train.target_modules=attn+mlp
+```
+
+The acceptance gate trains a randomly-initialised model over a 50-row fixture on
+CPU, with no network:
+
+```bash
+make -f ops/Makefile smoke        # CPU, seconds
+make -f ops/Makefile smoke-gpu    # the checkpoint in train.base_model
+```
+
+The base model is a value in `params.yaml`. Nothing in the source names a model:
+the loader reads the checkpoint's own `config.architectures`, prompts render
+through its tokenizer's chat template, and LoRA targets are resolved by role from
+the loaded module tree.
+
 Teacher generation, calibration, training, and deployment remain gated on the
 pilot measurements described in the plan; no adapter is currently released.
 

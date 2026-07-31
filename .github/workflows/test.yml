@@ -1,8 +1,13 @@
 name: test
 
-# Format-core tests only: pure functions over synthetic fixtures. No training,
-# no generation, no network — CI must never spend teacher budget or touch the
-# private Cambridge-derived data.
+# Two jobs. `check` is the fast one: pure functions over synthetic fixtures, no
+# training stack at all. `smoke` installs CPU torch and runs the acceptance gate,
+# because the defects it catches — a chat template that masks nothing, an adapter
+# that attaches to nothing — are invisible to unit tests over stubs.
+#
+# Neither job spends teacher budget, reaches the network at run time, or touches
+# the private Cambridge-derived data. The smoke fixture is synthetic and its
+# tokenizer is built from that fixture.
 on:
   push:
     branches: [main]
@@ -45,3 +50,26 @@ jobs:
 
       - name: pytest
         run: uv run pytest -q
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # `--group smoke` pulls CPU-only torch wheels; the group is excluded from
+      # the job above so the fast checks stay fast.
+      - name: Install the CPU training stack
+        run: uv sync --locked --group smoke --dev
+
+      - name: smoke
+        run: make -f ops/Makefile smoke
+
+      # The tests that need a real tokenizer skip in the `check` job and run here.
+      - name: pytest with the training stack
+        run: uv run pytest -q
+

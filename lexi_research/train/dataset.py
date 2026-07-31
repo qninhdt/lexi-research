@@ -1,31 +1,30 @@
-"""Convert processed rows to the exact prompt/completion pairs a student learns."""
+"""Convert processed rows to the exact prompt/completion pairs a student learns.
+
+The tokenised form lives in `collate`, which is what the trainer consumes. This
+module is the untokenised view of the same example — used where a tokenizer is
+neither available nor wanted, such as inspecting a row or building a prompt for
+an external engine.
+"""
 
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping
 from typing import Any
 
-from lexi_research.teacher import render_grader_prompt
-from lexi_research.teacher.schemas import SenseRef
+from .collate import completion_text, training_messages
 
 
-def training_example(row: dict[str, Any], *, nonce: str = "training") -> dict[str, str]:
-    """One prompt-parity-preserving SFT example; bands remain code-derived."""
-    messages = render_grader_prompt(
-        str(row["target"]),
-        SenseRef(definition=str(row["definition"]), pos=str(row["pos"])),
-        str(row["text"]),
-        nonce=nonce,
-    )
-    completion = json.dumps(
-        {key: row[key] for key in ("correction", "meaning", "feedback")},
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+def training_example(row: Mapping[str, Any], *, nonce: str | None = None) -> dict[str, str]:
+    """One prompt-parity-preserving SFT example; bands remain code-derived.
+
+    `nonce` is left unset by default so each call draws a fresh delimiter, the
+    distribution inference draws from. A constant would teach one literal token.
+    """
+    messages = training_messages(row, nonce=nonce)
     return {
         "system": messages[0]["content"],
         "user": messages[1]["content"],
-        "completion": completion,
+        "completion": completion_text(row),
     }
 
 

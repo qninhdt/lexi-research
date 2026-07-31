@@ -67,8 +67,19 @@ calibrate:
   seed: 20260729
 
 train:
+  # Any causal-LM checkpoint. Nothing in this section names an architecture:
+  # LoRA targets are resolved from the loaded model's own module tree and the
+  # chat format from its own tokenizer template, so switching base model is a
+  # value change here rather than a code change.
   base_model: Qwen/Qwen3.5-4B
-  max_seq_len: 1024
+  # The rubric in the grader system prompt is long: a rendered example measures
+  # ~1250 whitespace tokens before subword splitting, so the previous 1024 would
+  # have dropped every row. Headroom here covers a subword tokenizer, a longer
+  # learner sentence, and a reasoning block.
+  max_seq_len: 4096
+  # Rows over the limit are dropped, and dropping is length-biased. Past this
+  # share the remaining data is a different distribution, so the run stops.
+  max_drop_fraction: 0.02
   lora_r: 32
   lora_alpha: 64
   lora_dropout: 0.05
@@ -78,6 +89,51 @@ train:
   grad_accum: 8
   warmup_ratio: 0.03
   seed: 20260729
+  logging_steps: 10
+  save_steps: 100
+  gradient_checkpointing: true
+  # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
+  # gate sets it to 2.
+  max_steps: 0
+  load_in_4bit: true
+  # `attn` | `attn+mlp` | `all-linear`, or an explicit list of module-name
+  # patterns for a stack the layout below misreads. Ablation A6's arms.
+  target_modules: all-linear
+  # Loss over the answer only. False supervises the prompt too — ablation A7,
+  # and the behaviour of the trainer this one replaced.
+  completion_only: true
+  # Threaded into the chat template. Models with no thinking mode ignore it.
+  # Ablation A2.
+  enable_thinking: true
+  # How to read a decoder stack, as substring matches on one dotted path
+  # component each. One set of conventions therefore covers `self_attn`,
+  # `linear_attn` and `attn`, or `mlp`, `ffn` and `block_sparse_moe`. An
+  # architecture these misread is an edit here, not in the source.
+  layout:
+    layer_containers: [layers, h, blocks]
+    attention_markers: [attn, attention]
+    feedforward_markers: [mlp, ffn, feed_forward, experts, moe]
+    # MoE routers, matched by exact component name — `gate` is a router,
+    # `gate_proj` is not. No preset adapts them: adapting a router perturbs
+    # expert assignment. An explicit pattern list reaches them.
+    router_markers: [gate, router, shared_expert_gate]
+    excluded_markers: [visual, vision_tower, vision_model, image_encoder, audio_tower]
+
+# The CPU acceptance gate: a randomly-initialised model small enough that two
+# optimiser steps finish in seconds, over a fixture that carries no
+# Cambridge-derived text.
+smoke:
+  fixture: ops/fixtures/smoke_50.jsonl
+  steps: 2
+  # The stand-in stack. `architecture` is any model type this transformers
+  # install knows; it exists only to be small, and says nothing about the model
+  # a real run trains.
+  architecture: llama
+  hidden_size: 64
+  intermediate_size: 128
+  layers: 2
+  heads: 4
+  kv_heads: 2
 
 eval:
   max_new_tokens: 256
