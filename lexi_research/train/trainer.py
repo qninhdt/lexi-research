@@ -18,6 +18,10 @@ def train(
     Requires the optional Colab dependencies in `requirements-colab.txt`; keeping
     them out of the base environment preserves fast, CPU-only CI.
     """
+    if "WANDB_API_KEY" not in os.environ and "WANDB_DISABLED" not in os.environ:
+        os.environ["WANDB_DISABLED"] = "true"
+        os.environ["WANDB_MODE"] = "disabled"
+
     try:
         import torch  # type: ignore[import-not-found]
         from datasets import Dataset  # type: ignore[import-not-found]
@@ -81,7 +85,7 @@ def train(
             bf16=True,
             save_steps=100,
             gradient_checkpointing=True,
-            report_to="none" if os.environ.get("WANDB_DISABLED") else "wandb",
+            report_to="none" if os.environ.get("WANDB_DISABLED") == "true" or os.environ.get("WANDB_MODE") == "disabled" else "wandb",
         ),
     )
     trainer.train()
