@@ -67,7 +67,7 @@ calibrate:
   seed: 20260729
 
 train:
-  base_model: Qwen/Qwen2.5-7B-Instruct
+  base_model: Qwen/Qwen3.5-4B
   max_seq_len: 1024
   lora_r: 32
   lora_alpha: 64
