@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
 
 from .config import Config, ConfigError, load_config
 
@@ -176,14 +178,42 @@ def _handle_eval_score(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-def _handle_train_sft(config: Config, args: argparse.Namespace) -> int:
+def _train_once(
+    config: Config,
+    args: argparse.Namespace,
+    *,
+    stage: str,
+    output_dir: str,
+    group: str | None = None,
+) -> Any:
+    """One SFT run, with lineage, in-loop eval, and the artifact it publishes."""
+    from lexi_research.eval.harness import iter_rows, load_ceiling
+    from lexi_research.format import BandConfig
     from lexi_research.tracking import collect, start
     from lexi_research.train.trainer import train_sft
 
-    lineage = collect(config.as_dict(), stage="sft")
-    run = start(config, stage="sft", lineage=lineage)
+    band_config = BandConfig.from_json(args.band_config)
+    val_rows = None
+    ceiling = None
+    if args.val:
+        subset = config.get_int("train.eval_subset")
+        val_rows = list(iter_rows(args.val))[:subset]
+        ceiling = load_ceiling(args.ceiling) if args.ceiling else {}
+
+    run_config = config.with_overrides([f"tracking.group={group}"]) if group else config
+    lineage = collect(run_config.as_dict(), stage=stage)
+    run = start(run_config, stage=stage, lineage=lineage)
     try:
-        result = train_sft(config, train_path=args.train, output_dir=args.output, run=run)
+        result = train_sft(
+            run_config,
+            train_path=args.train,
+            output_dir=output_dir,
+            run=run,
+            resume=args.resume,
+            val_rows=val_rows,
+            band_config=band_config,
+            ceiling=ceiling,
+        )
         # The adapter and the band config version together: a checkpoint without
         # the config that derives its bands produces meaningless bands.
         run.log_artifact(
@@ -194,7 +224,52 @@ def _handle_train_sft(config: Config, args: argparse.Namespace) -> int:
         run.summary({"examples": result.examples, "dropped": result.dropped})
     finally:
         run.finish()
+    return result
+
+
+def _handle_train_sft(config: Config, args: argparse.Namespace) -> int:
+    result = _train_once(config, args, stage="sft", output_dir=args.output)
     print(result.summary())
+    return 0
+
+
+def _handle_train_sweep(config: Config, args: argparse.Namespace) -> int:
+    """Run every arm of an ablation, resuming from wherever the last session died."""
+    from lexi_research.train.sweep import (
+        SweepState,
+        default_ablation_path,
+        iter_arms,
+        load_ablation,
+        summarise,
+    )
+
+    ablation = load_ablation(args.definition or default_ablation_path(args.ablation))
+    state = SweepState.load(Path(args.output) / f"{ablation.key}-state.json")
+    print(summarise(ablation, state), flush=True)
+
+    for arm in iter_arms(ablation, state, resume=not args.restart):
+        print(f"\n=== {arm.name}: {' '.join(arm.overrides)}", flush=True)
+        arm_config = config.with_overrides(arm.overrides)
+        result = _train_once(
+            arm_config,
+            args,
+            stage=ablation.key,
+            output_dir=str(Path(args.output) / arm.name),
+            group=ablation.key,
+        )
+        state.record(
+            arm,
+            {
+                "steps": result.steps,
+                "examples": result.examples,
+                "dropped": result.dropped,
+                "targets": result.targets.summary(),
+                "output_dir": str(result.output_dir),
+            },
+        )
+        print(result.summary(), flush=True)
+
+    print(f"\n{summarise(ablation, state)}")
     return 0
 
 
@@ -270,7 +345,24 @@ def build_parser() -> argparse.ArgumentParser:
     sft.add_argument("--train", required=True, help="parquet or jsonl training rows")
     sft.add_argument("--output", required=True, help="adapter output directory")
     sft.add_argument("--band-config", default="band_config.json")
+    sft.add_argument("--val", default=None, help="rows for in-loop evaluation")
+    sft.add_argument("--ceiling", default=None, help="teacher self-consistency artifact")
+    sft.add_argument("--resume", default="auto", help="`auto`, `none`, or a checkpoint directory")
     sft.set_defaults(handler=_handle_train_sft)
+
+    sweep = train.add_parser("sweep", parents=[common], help="run every arm of an ablation")
+    sweep.add_argument("--ablation", default="a7", help="ablation key, e.g. a2, a6, a7")
+    sweep.add_argument("--definition", default=None, help="explicit path to an arm YAML")
+    sweep.add_argument("--train", required=True)
+    sweep.add_argument("--output", default="runs/sweeps")
+    sweep.add_argument("--band-config", default="band_config.json")
+    sweep.add_argument("--val", default=None)
+    sweep.add_argument("--ceiling", default=None)
+    sweep.add_argument("--resume", default="auto")
+    sweep.add_argument(
+        "--restart", action="store_true", help="re-run arms already recorded as complete"
+    )
+    sweep.set_defaults(handler=_handle_train_sweep)
     rl = train.add_parser("rl", parents=[common], help="GRPO / JEPO / NRT")
     rl.add_argument("--variant", default="grpo", choices=["grpo", "jepo", "nrt"])
     rl.set_defaults(handler=_not_yet(4, "RL training"))

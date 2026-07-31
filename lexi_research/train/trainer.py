@@ -21,6 +21,7 @@ from typing import Any
 
 from lexi_research.cli.config import Config
 
+from .callbacks import resolve_resume
 from .collate import IGNORE_INDEX, Example, SequenceTooLong, build_example
 from .modules import Layout, TargetResolution, resolve_target_modules
 
@@ -66,7 +67,7 @@ def build_examples(
     rows: Sequence[Mapping[str, Any]],
     *,
     max_seq_len: int,
-    enable_thinking: bool,
+    thinking: str,
     completion_only: bool,
     max_drop_fraction: float = 0.02,
 ) -> tuple[list[Example], int]:
@@ -85,7 +86,7 @@ def build_examples(
                 build_example(
                     tokenizer,
                     row,
-                    enable_thinking=enable_thinking,
+                    thinking=thinking,
                     completion_only=completion_only,
                     max_seq_len=max_seq_len,
                 )
@@ -226,6 +227,10 @@ def train_sft(
     model: Any | None = None,
     tokenizer: Any | None = None,
     run: Any | None = None,
+    resume: str | None = None,
+    val_rows: Sequence[Mapping[str, Any]] | None = None,
+    band_config: Any | None = None,
+    ceiling: Mapping[str, Any] | None = None,
 ) -> TrainResult:
     """Run supervised fine-tuning under `config`.
 
@@ -234,6 +239,10 @@ def train_sft(
     named by `train.base_model` is loaded. `run` is an open tracking handle —
     when it is recording, the Trainer's own metrics go to the same run as the
     lineage, rather than to a second one it opens for itself.
+
+    `val_rows` turns on in-loop evaluation. Loss falls smoothly while a model
+    learns to emit prose instead of JSON, so watching loss alone can burn an
+    entire session before the failure is visible.
     """
     try:
         import torch
@@ -257,7 +266,7 @@ def train_sft(
         tokenizer,
         rows,
         max_seq_len=config.get_int("train.max_seq_len"),
-        enable_thinking=config.get_bool("train.enable_thinking"),
+        thinking=config.get_str("train.thinking"),
         completion_only=config.get_bool("train.completion_only"),
         max_drop_fraction=config.get_float("train.max_drop_fraction"),
     )
@@ -295,7 +304,22 @@ def train_sft(
         train_dataset=_ExampleDataset(examples),
         data_collator=lambda batch: collate_batch(batch, pad_token_id),
     )
-    outcome = trainer.train()
+    if val_rows:
+        from .callbacks import build_eval_callback
+
+        trainer.add_callback(
+            build_eval_callback(
+                config=config,
+                run=run,
+                tokenizer=tokenizer,
+                rows=val_rows,
+                band_config=band_config,
+                ceiling=ceiling or {},
+                every_steps=config.get_int("train.eval_steps"),
+            )
+        )
+
+    outcome = trainer.train(resume_from_checkpoint=resolve_resume(output_dir, resume))
     trainer.save_model(str(output_dir))
 
     return TrainResult(

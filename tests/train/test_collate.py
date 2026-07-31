@@ -186,8 +186,8 @@ def test_chat_template_parity(tokenizer) -> None:
 
 
 def test_thinking_flag_changes_render(tokenizer) -> None:
-    thinking = build_example(tokenizer, ROW, nonce="feedface", enable_thinking=True)
-    plain = build_example(tokenizer, ROW, nonce="feedface", enable_thinking=False)
+    thinking = build_example(tokenizer, ROW, nonce="feedface", thinking="on")
+    plain = build_example(tokenizer, ROW, nonce="feedface", thinking="off")
 
     assert thinking.input_ids != plain.input_ids
     assert "<think>" in tokenizer.decode(list(thinking.input_ids))
@@ -275,7 +275,7 @@ def test_an_asymmetric_template_still_masks_correctly() -> None:
                 text += "<think> </think> "
             return text
 
-    example = build_example(AsymmetricTokenizer(), ROW, nonce="feedface", enable_thinking=False)
+    example = build_example(AsymmetricTokenizer(), ROW, nonce="feedface", thinking="off")
     assert example.supervised_tokens
     assert example.supervised_tokens < len(example.labels)
 
@@ -323,3 +323,32 @@ def test_the_template_path_holds_against_a_real_tokenizer() -> None:
     example = build_example(real, ROW, nonce="feedface")
     assert example.supervised_tokens
     assert example.supervised_tokens < len(example.labels)
+
+
+def test_forced_empty_supervises_an_empty_reasoning_block(tokenizer) -> None:
+    """A2's third arm. Without it, a win for `on` over `off` is uninterpretable:
+    it could mean reasoning helps, or that the scaffold alone shifts the
+    distribution the answer is sampled from."""
+    forced = build_example(tokenizer, ROW, nonce="feedface", thinking="forced-empty")
+    plain = build_example(tokenizer, ROW, nonce="feedface", thinking="on")
+
+    supervised = [
+        token
+        for token, label in zip(forced.input_ids, forced.labels, strict=True)
+        if label != IGNORE_INDEX
+    ]
+    decoded = tokenizer.decode(supervised)
+    assert "<think>" in decoded and "</think>" in decoded
+    assert forced.supervised_tokens > plain.supervised_tokens
+
+
+def test_forced_empty_still_opens_the_templates_reasoning_path(tokenizer) -> None:
+    """It differs from `off` in the prompt as well as in what is supervised."""
+    forced = build_example(tokenizer, ROW, nonce="feedface", thinking="forced-empty")
+    off = build_example(tokenizer, ROW, nonce="feedface", thinking="off")
+    assert forced.input_ids != off.input_ids
+
+
+def test_an_unknown_thinking_mode_raises(tokenizer) -> None:
+    with pytest.raises(CollationError, match="thinking"):
+        build_example(tokenizer, ROW, nonce="feedface", thinking="sometimes")

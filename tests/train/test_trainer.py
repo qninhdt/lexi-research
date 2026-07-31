@@ -42,7 +42,7 @@ def _build(rows, **kwargs):
         StubTokenizer(),
         rows,
         max_seq_len=kwargs.pop("max_seq_len", 100_000),
-        enable_thinking=True,
+        thinking="on",
         completion_only=True,
         **kwargs,
     )

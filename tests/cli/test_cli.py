@@ -54,12 +54,12 @@ def test_repeated_overrides_all_apply(capsys) -> None:
             "--override",
             "train.lora_r=8",
             "--override",
-            "train.enable_thinking=false",
+            "train.thinking=forced-empty",
         ],
         capsys,
     )
     assert payload["train"]["lora_r"] == 8
-    assert payload["train"]["enable_thinking"] is False
+    assert payload["train"]["thinking"] == "forced-empty"
 
 
 def test_an_unknown_override_is_rejected_before_anything_runs() -> None:
@@ -89,3 +89,12 @@ def test_the_committed_fixture_still_meets_its_contract() -> None:
     """Every band, both tag groups, a null correction, a multiword, a clean row."""
     summary = check_fixture(load_rows(FIXTURE))
     assert "16/16 tags" in summary
+
+
+@pytest.mark.parametrize("ablation", ["a2", "a6", "a7"])
+def test_every_ablation_key_reaches_the_sweep_command(ablation, capsys) -> None:
+    """An arm changes through --override; the sweep is how they are launched."""
+    payload = _print_config(
+        ["train", "sweep", "--ablation", ablation, "--train", FIXTURE], capsys
+    )
+    assert payload["train"]["target_modules"]

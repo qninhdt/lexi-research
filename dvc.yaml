@@ -152,14 +152,18 @@ stages:
     cmd: >-
       uv run lexi train sft
       --train data/clean/train.parquet
+      --val data/clean/val.parquet
+      --ceiling reports/pilot-ceiling.json
       --band-config data/clean/band_config.json
       --output runs/sft/adapter
     deps:
       - data/clean/train.parquet
+      - data/clean/val.parquet
       - data/clean/band_config.json
       - lexi_research/train/trainer.py
       - lexi_research/train/collate.py
       - lexi_research/train/modules.py
+      - lexi_research/train/callbacks.py
     params:
       - train
       - tracking

@@ -35,6 +35,17 @@ IGNORE_INDEX = -100
 #: by code from the correction, so asking the model for them invites drift.
 ANSWER_FIELDS = ("correction", "meaning", "feedback")
 
+#: The three arms of ablation A2.
+#:
+#: `forced-empty` is the arm that makes the other two interpretable. A win for
+#: `on` over `off` could mean reasoning helps, or it could mean the `<think>`
+#: scaffold alone changes the distribution the answer is sampled from; training
+#: the model to emit an empty block separates those.
+THINKING_MODES = ("on", "off", "forced-empty")
+
+#: What `forced-empty` supervises before the answer.
+EMPTY_REASONING = "<think>\n\n</think>\n\n"
+
 
 class CollationError(ValueError):
     """The template, the mask, or the length made an example unusable."""
@@ -159,12 +170,22 @@ def _encode_plain(tokenizer: ChatTokenizer, text: str) -> list[int]:
     return [int(token) for token in tokenizer.encode(text, add_special_tokens=False)]
 
 
+def _supervised_text(row: Mapping[str, Any], thinking: str) -> str:
+    """What the assistant turn must contain, for this arm of A2."""
+    if thinking not in THINKING_MODES:
+        raise CollationError(f"thinking={thinking!r}; expected one of {list(THINKING_MODES)}")
+    if thinking == "forced-empty":
+        return EMPTY_REASONING + completion_text(row)
+    return completion_text(row)
+
+
 def _mask_from_concatenation(
     tokenizer: ChatTokenizer,
     messages: list[ChatMsg],
     row: Mapping[str, Any],
     *,
     enable_thinking: bool,
+    thinking: str,
 ) -> tuple[list[int], list[int]]:
     """Fallback: build the sequence as prompt + answer, so the boundary is exact.
 
@@ -192,7 +213,7 @@ def _mask_from_concatenation(
         raise CollationError(
             "the tokenizer declares no eos_token, so the answer cannot be terminated"
         )
-    completion = _encode_plain(tokenizer, completion_text(row) + terminator)
+    completion = _encode_plain(tokenizer, _supervised_text(row, thinking) + terminator)
     if not completion:
         raise CollationError("the answer tokenised to nothing")
     return prompt + completion, [0] * len(prompt) + [1] * len(completion)
@@ -202,7 +223,7 @@ def build_example(
     tokenizer: ChatTokenizer,
     row: Mapping[str, Any],
     *,
-    enable_thinking: bool = True,
+    thinking: str = "on",
     completion_only: bool = True,
     max_seq_len: int | None = None,
     nonce: str | None = None,
@@ -215,21 +236,28 @@ def build_example(
     because a tokenizer that renders one space differently would move the
     boundary silently.
 
+    `thinking` is ablation A2. `on` and `forced-empty` both open the template's
+    reasoning path — the difference is that `forced-empty` supervises an empty
+    block — while `off` asks the template not to open one at all.
+
     `completion_only=False` supervises the whole sequence — the old behaviour,
     kept as the other arm of the loss-mask ablation rather than as a fallback.
     """
+    if thinking not in THINKING_MODES:
+        raise CollationError(f"thinking={thinking!r}; expected one of {list(THINKING_MODES)}")
+    enable_thinking = thinking != "off"
     messages = training_messages(row, nonce=nonce)
 
     marked = None
     if _marks_assistant_tokens(tokenizer):
         conversation: list[ChatMsg] = [
             *messages,
-            {"role": "assistant", "content": completion_text(row)},
+            {"role": "assistant", "content": _supervised_text(row, thinking)},
         ]
         marked = _mask_from_template(tokenizer, conversation, enable_thinking=enable_thinking)
     if marked is None:
         ids, mask = _mask_from_concatenation(
-            tokenizer, messages, row, enable_thinking=enable_thinking
+            tokenizer, messages, row, enable_thinking=enable_thinking, thinking=thinking
         )
     else:
         ids, mask = marked
@@ -246,7 +274,9 @@ def build_example(
 
 __all__ = [
     "ANSWER_FIELDS",
+    "EMPTY_REASONING",
     "IGNORE_INDEX",
+    "THINKING_MODES",
     "ChatTokenizer",
     "CollationError",
     "Example",

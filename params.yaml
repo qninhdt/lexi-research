@@ -91,6 +91,12 @@ train:
   seed: 20260729
   logging_steps: 10
   save_steps: 100
+  # In-loop evaluation interval. Loss falls smoothly while format validity
+  # collapses, so the harness runs during training rather than after it. 0 is off.
+  eval_steps: 200
+  # Rows scored in loop. Fixed and small, and fixed across arms — an ablation
+  # whose arms were scored on different rows is not an ablation.
+  eval_subset: 32
   gradient_checkpointing: true
   # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
   # gate sets it to 2.
@@ -102,9 +108,11 @@ train:
   # Loss over the answer only. False supervises the prompt too — ablation A7,
   # and the behaviour of the trainer this one replaced.
   completion_only: true
-  # Threaded into the chat template. Models with no thinking mode ignore it.
-  # Ablation A2.
-  enable_thinking: true
+  # Ablation A2: `on`, `off`, or `forced-empty`. The third arm keeps the
+  # template's reasoning path open but supervises an empty block, which is what
+  # separates "reasoning helps" from "the scaffold alone helps". Quoted: YAML
+  # reads a bare `on` as the boolean true.
+  thinking: "on"
   # How to read a decoder stack, as substring matches on one dotted path
   # component each. One set of conventions therefore covers `self_attn`,
   # `linear_attn` and `attn`, or `mlp`, `ffn` and `block_sparse_moe`. An

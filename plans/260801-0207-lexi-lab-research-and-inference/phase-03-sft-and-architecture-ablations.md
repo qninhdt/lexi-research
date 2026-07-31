@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "SFT and architecture ablations"
-status: pending
+status: blocked-on-hardware
 priority: P1
 size: M
 dependencies: [2]
@@ -67,20 +67,28 @@ is the widest sweep and should run last with the other two settled.
 
 ## Files
 
-**Create**
+**Created**
 
-- `lexi_research/train/sft.py` — trainer built on the Phase 0 helpers
-- `lexi_research/train/callbacks.py` — in-loop eval, qualitative W&B table, checkpoint/resume
+- `lexi_research/train/callbacks.py` — in-loop eval, qualitative W&B table, checkpoint resolution
 - `lexi_research/train/sweep.py` — ablation arm enumeration and resumable launching
 - `ops/ablations/a2-thinking.yaml`, `a6-lora.yaml`, `a7-mask.yaml` — arm definitions
 - `tests/train/test_sweep.py`, `tests/train/test_callbacks.py`
+- `plans/…/reports/phase-03-findings.md`
 
-**Modify**
+**Modified**
 
-- `lexi_research/train/trainer.py` — becomes a thin dispatch to `sft.py` / later `rl/`
-- `params.yaml` — real training hyperparameters, checkpoint interval, eval interval
-- `dvc.yaml` — `sft` stage
-- `notebooks/lexi_colab.py` — the sweep invocation
+- `lexi_research/train/collate.py` — `train.thinking` with three arms; `forced-empty` supervises an empty reasoning block
+- `lexi_research/train/trainer.py` — resume, in-loop eval, val rows
+- `lexi_research/cli/__init__.py` — `lexi train sweep`; `--val`, `--ceiling`, `--resume` on `sft`
+- `params.yaml` — `train.thinking`, `eval_steps`, `eval_subset`
+- `dvc.yaml` — `sft` stage takes val and the ceiling
+- `notebooks/lexi_colab.py` — the sweep and scoring invocations
+
+**Deviation.** The plan called for a new `sft.py` with `trainer.py` reduced to a
+dispatcher. `trainer.py` already *is* the SFT trainer built on the Phase 0
+helpers; renaming it would churn every DVC dep and every import for no behaviour
+change. The dispatcher arrives when there is a second trainer to dispatch to,
+which is Phase 4.
 
 ## Implementation steps
 
@@ -111,13 +119,30 @@ is the widest sweep and should run last with the other two settled.
 
 ## Acceptance
 
-- One adapter trained on real data, pushed as a W&B artifact with `band_config.json`.
-- Phase 2 report generated for it, with every metric normalised to the ceiling.
-- A7, A2, A6 complete, each a W&B group with a parallel-coordinates panel.
-- A killed and resumed run reaches the same final metrics as an uninterrupted one,
-  within seed noise.
-- Findings written to `plans/…/reports/phase-03-findings.md`, including the
-  trainable-parameter and VRAM columns for A6.
+Infrastructure — done and exercised on CPU:
+
+- [x] Each arm is a single `--override`; changing one never edits code. A test
+      resolves every override of every arm against `params.yaml`, so an arm
+      cannot silently fail to change anything.
+- [x] `lexi train sweep --ablation a6` enumerates 7 arms and launches them in
+      order, recording state after each so a killed session resumes at the next.
+- [x] Every run logs the resolved target-module list and coverage, not just the
+      preset name.
+- [x] `--resume auto` picks the latest checkpoint by step, and an explicit
+      missing checkpoint raises rather than silently starting from zero.
+- [x] In-loop eval fires on the configured interval and is switchable off.
+- [x] `make smoke` still green; `uv run pytest` 632.
+
+Experiments — blocked on a GPU and a real dataset:
+
+- [ ] One adapter trained on real data, pushed as a W&B artifact with its band config.
+- [ ] Phase 2 report generated for it, normalised to the ceiling.
+- [ ] A7, A2, A6 complete, each a W&B group.
+- [ ] A killed and resumed run reaching the same final metrics as an
+      uninterrupted one, within seed noise. Resume is unit-tested; that it
+      *converges* the same is not, and cannot be until there is a real run.
+- [ ] Findings filled in at `plans/…/reports/phase-03-findings.md`, which
+      currently states plainly that every row is pending.
 
 ## Risks
 

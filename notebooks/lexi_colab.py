@@ -65,12 +65,52 @@ for name in ("WANDB_API_KEY", "LEXI_TEACHER_BASE_URL", "LEXI_TEACHER_API_KEY", "
 # %%
 !lexi train sft \
     --train data/clean/train.parquet \
+    --val data/clean/val.parquet \
+    --ceiling reports/pilot-ceiling.json \
     --band-config data/clean/band_config.json \
     --output runs/sft/adapter \
+    --resume auto \
     --override train.target_modules=all-linear
 
 # %% [markdown]
-# ## 6. Confirm the artifact
+# ## 6. Sweep an ablation
+#
+# Every arm is a set of overrides and nothing else, so the diff between two runs
+# is only the axis under test. State is written after each arm: a killed session
+# resumes at the next one rather than at the first.
+#
+# `a7` (loss mask) first, then `a2` (thinking), then `a6` (LoRA placement).
+
+# %%
+!lexi train sweep --ablation a7 \
+    --train data/clean/train.parquet \
+    --val data/clean/val.parquet \
+    --ceiling reports/pilot-ceiling.json \
+    --band-config data/clean/band_config.json \
+    --output runs/sweeps
+
+# %% [markdown]
+# ## 7. Score the adapter
+#
+# Generation needs the GPU; scoring does not, so the two are separate commands
+# and a metric fix never costs a re-run of the model.
+
+# %%
+!lexi eval predict \
+    --rows data/clean/test.parquet \
+    --adapter runs/sft/adapter \
+    --band-config data/clean/band_config.json \
+    --out reports/predictions-sft.jsonl
+
+# %%
+!lexi eval score \
+    --predictions reports/predictions-sft.jsonl \
+    --ceiling reports/pilot-ceiling.json \
+    --band-config data/clean/band_config.json \
+    --out reports/eval-sft.json
+
+# %% [markdown]
+# ## 8. Confirm the artifact
 #
 # The adapter and its band config went up as one artifact. A checkpoint without
 # the config that derives its bands produces meaningless bands, so a run that

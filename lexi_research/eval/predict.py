@@ -98,7 +98,9 @@ def predict_rows(
 
     max_new_tokens = config.get_int("eval.max_new_tokens")
     temperature = config.get_float("eval.temperature")
-    enable_thinking = config.get_bool("train.enable_thinking")
+    # `forced-empty` still opens the template's reasoning path at inference;
+    # only `off` asks it not to.
+    enable_thinking = config.get_str("train.thinking") != "off"
 
     out: list[dict[str, Any]] = []
     for row in rows:
