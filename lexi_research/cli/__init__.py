@@ -297,6 +297,20 @@ def _handle_train_rl(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_report_model_card(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.report.model_card import generate
+
+    written = generate(
+        args.report,
+        args.out,
+        base_model=config.get_str("train.base_model"),
+        rl_verdict=args.rl_verdict,
+        comparison_path=args.comparison,
+    )
+    print(f"wrote {written}")
+    return 0
+
+
 def _handle_bench_run(config: Config, args: argparse.Namespace) -> int:
     """Benchmark one engine across concurrency levels, and skip loudly."""
     import json as _json
@@ -592,6 +606,22 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_parser("up", parents=[common], help="run the shim").set_defaults(
         handler=_not_yet(5, "the engine-adapter serving layer")
     )
+
+    report = groups.add_parser("report", help="generated artifacts").add_subparsers(
+        dest="command", required=True
+    )
+    card = report.add_parser(
+        "model-card", parents=[common], help="generate MODEL_CARD.md from the eval report"
+    )
+    card.add_argument("--report", default="reports/eval-sft.json")
+    card.add_argument("--comparison", default="reports/compare.json")
+    card.add_argument("--out", default="MODEL_CARD.md")
+    card.add_argument(
+        "--rl-verdict",
+        default="Not yet measured: the RL arms need a GPU and a trained SFT baseline.",
+        help="stated plainly either way, per the design",
+    )
+    card.set_defaults(handler=_handle_report_model_card)
 
     smoke = groups.add_parser("smoke", parents=[common], help="the acceptance gate")
     smoke.add_argument("--gpu", action="store_true", help="use the real base model")

@@ -88,11 +88,27 @@ the loaded module tree.
 Teacher generation, calibration, training, and deployment remain gated on the
 pilot measurements described in the plan; no adapter is currently released.
 
+## What the numbers mean
+
+Every number this project can produce is **fidelity to a teacher, not accuracy
+against ground truth**. There is no human gold set; train and test are both
+teacher-generated, so the real-learner distribution is unverified. Metrics are
+reported as a fraction of teacher self-consistency, because a student cannot
+exceed the agreement its teacher has with itself.
+
+See [`docs/results.md`](docs/results.md) for what was built, what it already
+showed, and what the experiments will and will not be able to say.
+
 ## Status
 
-Phase 1 (format core) only. Bands are **uncalibrated** — `band_config.json` has
-`"calibrated": false`, and the eval harness must refuse to report band metrics
-until Phase 6 flips it.
+The lab is built and green end to end on CPU: `lexi smoke` runs the data stages,
+both label-masking paths, an SFT run, and all three RL tracks over a synthetic
+50-row fixture with no network. No experimental result exists yet — every one of
+them needs a GPU and a real dataset.
+
+Bands are **uncalibrated** until `lexi data calibrate` has run: `band_config.json`
+ships with `"calibrated": false`, and the eval harness refuses to report band
+metrics until that flips.
 
 ## License
 

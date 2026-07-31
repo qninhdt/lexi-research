@@ -1,7 +1,7 @@
 ---
 phase: 6
 title: "MoE comparison and write-up"
-status: pending
+status: blocked-on-hardware
 priority: P2
 size: M
 dependencies: [4, 5]
@@ -100,11 +100,26 @@ different project with a different budget.
 
 ## Acceptance
 
-- B8 complete, all three systems on one plot.
-- `MODEL_CARD.md` generated, not hand-edited; regenerating produces no diff.
-- W&B Report published, linked from the README.
-- `docs/results.md` written, including negative results.
-- A reader can reproduce any headline number from the repo plus a GPU.
+Artifacts — done:
+
+- [x] `lexi report model-card` generates the card from the eval report; a test
+      asserts regeneration produces no diff.
+- [x] Limitations copied verbatim from the design docs, asserted by a test.
+- [x] The card states fidelity-not-accuracy, shows every headline metric as a
+      fraction of the teacher ceiling, and admits a dirty tree.
+- [x] `bench/compare.py` assembles the three systems through the Phase 5 runner
+      and the Phase 2 harness — no metric that exists only in the comparison.
+- [x] Quality per dollar at a fixed SLO, with a missed SLO scoring zero.
+- [x] `docs/results.md` written, including the negative result most likely to
+      appear, before it has been measured.
+- [x] README leads with fidelity-not-accuracy rather than burying it.
+- [x] `dvc.yaml` has the `model_card` stage.
+
+Experiment — blocked on a burst-tier rental:
+
+- [ ] B8 complete, all three systems on one plot.
+- [ ] `MODEL_CARD.md` regenerated from a real eval report.
+- [ ] W&B Report published and linked from the README.
 
 ## Risks
 

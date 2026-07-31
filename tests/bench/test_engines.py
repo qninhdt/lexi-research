@@ -44,9 +44,7 @@ def test_skip_reason_names_the_unsupported_quantisation() -> None:
 
 
 def test_skip_reason_names_the_unsupported_feature() -> None:
-    reason = skip_reason(
-        build("hf", "x").capabilities(), quantisation="bf16", features=("mtp",)
-    )
+    reason = skip_reason(build("hf", "x").capabilities(), quantisation="bf16", features=("mtp",))
     assert reason is not None and "speculative" in reason
 
 

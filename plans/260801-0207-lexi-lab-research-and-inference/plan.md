@@ -52,7 +52,7 @@ number. Scope decisions are made against that goal, not against a product.
 | 3 | [SFT and architecture ablations](phase-03-sft-and-architecture-ablations.md) | 2 | sweep runner, resume, in-loop eval; A2/A6/A7 arms defined | infra done, runs need a GPU |
 | 4 | [RL — GRPO, JEPO, NRT](phase-04-rl-grpo-jepo-nrt.md) | 3 | three tracks on one mask, all green on CPU; A1/A3/A4 arms defined | impl done, runs need a GPU |
 | 5 | [Inference lab](phase-05-inference-lab.md) | 2 | engine adapters, open-loop bench harness; B1–B7 defined | harness done, sweeps need a GPU |
-| 6 | [MoE comparison and write-up](phase-06-moe-comparison-and-writeup.md) | 4, 5 | B8, model card, W&B report | pending |
+| 6 | [MoE comparison and write-up](phase-06-moe-comparison-and-writeup.md) | 4, 5 | comparison, generated model card, results write-up | artifacts done, B8 needs a GPU |
 
 **Phase 5 depends only on Phase 2.** Run it in parallel with 3 and 4 — train on
 Colab while benchmarking on the rented GPU.

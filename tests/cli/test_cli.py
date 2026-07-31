@@ -25,7 +25,7 @@ def _print_config(argv: list[str], capsys) -> dict:
     return json.loads(capsys.readouterr().out)
 
 
-@pytest.mark.parametrize("group", ["data", "train", "eval", "bench", "serve", "smoke"])
+@pytest.mark.parametrize("group", ["data", "train", "eval", "bench", "serve", "report", "smoke"])
 def test_every_group_is_registered(group, capsys) -> None:
     with pytest.raises(SystemExit) as excinfo:
         build_parser().parse_args([group, "--help"])

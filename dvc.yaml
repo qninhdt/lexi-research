@@ -231,3 +231,18 @@ stages:
     metrics:
       - reports/bench-sft.json:
           cache: false
+
+  model_card:
+    # Generated, never hand-edited: a hand-written card drifts from the numbers
+    # and the drift is invisible because both are prose.
+    cmd: >-
+      uv run lexi report model-card
+      --report reports/eval-sft.json
+      --comparison reports/compare.json
+      --out MODEL_CARD.md
+    deps:
+      - reports/eval-sft.json
+      - lexi_research/report/model_card.py
+    outs:
+      - MODEL_CARD.md:
+          cache: false
