@@ -1,0 +1,37 @@
+# The pipeline. Every artifact is reproducible from the pinned source plus the
+# code and params hashed into each stage's signature.
+#
+# Stages beyond `export` are added as their phases land; a stage is only listed
+# once its code exists, so `dvc repro` never references a missing entrypoint.
+#
+# `LEXI_SOURCE_DB` is read from the environment rather than params.yaml: the
+# source is a local absolute path, and a tracked file holding it would make the
+# pipeline machine-specific. Determinism rests on the SHA-256 that
+# source-manifest.json records instead.
+
+stages:
+  export:
+    cmd: >-
+      uv run python -m lexi_research.data.cli
+      --source "$LEXI_SOURCE_DB"
+      --out data/pool
+      --profiles lexi_research/data/profiles.json
+      --min-rows 180000
+    deps:
+      - lexi_research/data/cli.py
+      - lexi_research/data/export.py
+      - lexi_research/data/pos_normalize.py
+      - lexi_research/data/profiles.json
+    params:
+      - export
+    outs:
+      # Cambridge-derived text: private, pushed to R2, never Git.
+      - data/pool/senses_pool.parquet
+      - data/pool/quarantine.parquet
+    # Counts and hashes only — no dictionary text — so these stay in Git as the
+    # provenance record a result can be traced back to.
+    metrics:
+      - data/pool/data-quality.json:
+          cache: false
+      - data/pool/source-manifest.json:
+          cache: false

@@ -1,0 +1,13 @@
+services:
+  grader-shim:
+    build:
+      context: .
+      dockerfile: serve/Dockerfile
+    environment:
+      LEXI_BACKEND_URL: ${LEXI_BACKEND_URL}
+      LEXI_BACKEND_MODEL: ${LEXI_BACKEND_MODEL}
+      LEXI_BACKEND_API_KEY: ${LEXI_BACKEND_API_KEY:-}
+      LEXI_ADAPTER_REVISION: ${LEXI_ADAPTER_REVISION:-unknown}
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped

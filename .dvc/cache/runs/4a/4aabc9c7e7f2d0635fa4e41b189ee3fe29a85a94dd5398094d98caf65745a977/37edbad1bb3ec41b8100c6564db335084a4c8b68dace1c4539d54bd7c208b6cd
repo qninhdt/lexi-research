@@ -1,0 +1,40 @@
+cmd: uv run python -m lexi_research.data.cli --source "$LEXI_SOURCE_DB" --out 
+  data/pool --profiles lexi_research/data/profiles.json --min-rows 180000
+deps:
+- path: lexi_research/data/cli.py
+  hash: md5
+  md5: d4ab601cab7199a46926e8d263819c1e
+  size: 1226
+- path: lexi_research/data/export.py
+  hash: md5
+  md5: 7e13375eb41b509979e9d04a415c2d88
+  size: 5711
+- path: lexi_research/data/pos_normalize.py
+  hash: md5
+  md5: 46c55528efca5c5d4b47e27e9548f8cc
+  size: 2323
+- path: lexi_research/data/profiles.json
+  hash: md5
+  md5: 7a8a4c670d4429a82163f97fefde6ad1
+  size: 3109
+params:
+  params.yaml:
+    export:
+      min_definition_chars: 3
+outs:
+- path: data/pool/data-quality.json
+  hash: md5
+  md5: b7a9563b0703708e829f6399a0e9532f
+  size: 577
+- path: data/pool/quarantine.parquet
+  hash: md5
+  md5: 7ce3074664bd208ab5cf1399f92d4037
+  size: 65994
+- path: data/pool/senses_pool.parquet
+  hash: md5
+  md5: 71f4282853d7fb540efbab67535ed9d9
+  size: 10825457
+- path: data/pool/source-manifest.json
+  hash: md5
+  md5: 7498a0a7ce90e61b0c41f0fa30d93a1a
+  size: 195

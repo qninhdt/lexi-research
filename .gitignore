@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Data artifacts are DVC-tracked, never Git-tracked. Cambridge-derived text is
+# private (redistribution rights unverified).
+data/
+*.parquet
+*.sqlite
+*.db
+
+# Training / eval outputs
+outputs/
+checkpoints/
+wandb/
+reports/

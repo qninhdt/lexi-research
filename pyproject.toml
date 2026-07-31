@@ -1,0 +1,59 @@
+[project]
+name = "lexi-research"
+version = "0.1.0"
+description = "Distil a frontier sentence grader into a small local student model: dataset generation, QLoRA training, evaluation, and an OpenAI-compatible serving shim."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "qninhdt", email = "qndt123@gmail.com" }
+]
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "jinja2>=3.1",
+    "openai>=1.60",
+    "pyarrow>=17",
+    "pydantic>=2.9",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "dvc>=3.0",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.9",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "lexi_research"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["lexi_research"]
+
+# pyarrow ships neither stubs nor a py.typed marker. Untyped is the upstream
+# state, not something this repo can fix, so the import is allowed through
+# rather than papered over with `type: ignore` at each call site.
+[[tool.mypy.overrides]]
+module = ["pyarrow.*"]
+ignore_missing_imports = true

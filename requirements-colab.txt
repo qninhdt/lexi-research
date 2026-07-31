@@ -1,0 +1,9 @@
+# Install only on the GPU runtime; intentionally excluded from CPU CI.
+torch
+transformers
+datasets
+trl
+peft
+bitsandbytes
+accelerate
+wandb

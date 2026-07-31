@@ -1,0 +1,47 @@
+name: test
+
+# Format-core tests only: pure functions over synthetic fixtures. No training,
+# no generation, no network — CI must never spend teacher budget or touch the
+# private Cambridge-derived data.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor and current: the package targets >=3.10, and `Tag` back-ports
+        # StrEnum behaviour that 3.11+ provides natively, so both must pass.
+        python-version: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+
+      - name: ruff
+        run: uv run ruff check .
+
+      - name: ruff format
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest
+        run: uv run pytest -q

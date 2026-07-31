@@ -1,0 +1,84 @@
+# DVC parameters. Tracked in Git, hashed into every stage's signature, so a
+# changed value invalidates exactly the artifacts that depended on it.
+#
+# The source path is deliberately absent: it is a local absolute path that
+# differs per machine, so it is read from LEXI_SOURCE_DB at stage runtime and
+# the pipeline's identity rests on the SHA-256 recorded in source-manifest.json.
+
+export:
+  # A definition shorter than this carries no gradable meaning.
+  min_definition_chars: 3
+
+sample:
+  seed: 20260729
+  # Sentences per sense per call. Fixed at 6 project-wide: larger batches raise
+  # intra-batch correlation and push call 2 further from single-item inference.
+  k: 6
+  # Senses drawn for the pilot, and for the full run.
+  pilot_senses: 84
+  full_senses: 3400
+  # Sampling weight per requested meaning band. Weighted toward the middle:
+  # unweighted, the teacher writes either clean sentences or nonsense and the
+  # bands real learners occupy stay empty.
+  meaning_weights:
+    "0": 1
+    "1": 3
+    "2": 3
+    "3": 3
+    "4": 2
+  error_spec_weights:
+    none: 2
+    one: 3
+    few: 3
+    many: 2
+    unreadable: 1
+  # Share of sampled senses that are multiword targets (idiom, phrasal verb,
+  # collocation, phrase). They are ~11% of the pool; over-sampling slightly so
+  # Phase 8 can report them separately with a usable sample size.
+  multiword_share: 0.15
+
+generate:
+  # Batches below this distinct-2 score are flagged in the generation report.
+  min_distinct2: 0.7
+
+label:
+  # Texts re-graded blind to measure teacher self-consistency (pilot gate G1).
+  self_consistency_sample: 200
+
+validate:
+  # Rejection rate above this means the prompt or schema is at fault, not the data.
+  max_reject_rate: 0.10
+
+balance:
+  # Cap on any one (meaning, error bucket) stratum, as a share of the dataset.
+  max_stratum_share: 0.15
+
+split:
+  version: v1
+  seed: 20260729
+  train: 0.8
+  val: 0.1
+  test: 0.1
+
+calibrate:
+  # Target share of rows in each band, used to place the threshold cut points.
+  # Uniform: no band should be so rare the student never learns it.
+  target: uniform
+  seed: 20260729
+
+train:
+  base_model: Qwen/Qwen2.5-7B-Instruct
+  max_seq_len: 1024
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.05
+  learning_rate: 1.0e-4
+  epochs: 2
+  per_device_batch_size: 4
+  grad_accum: 8
+  warmup_ratio: 0.03
+  seed: 20260729
+
+eval:
+  max_new_tokens: 256
+  temperature: 0.0
