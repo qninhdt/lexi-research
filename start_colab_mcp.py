@@ -39,8 +39,8 @@ async def run_notebook_cells(client):
         
     # 2. Setup environment
     print("\n--- [Step 2/3] Adding & Executing Environment Setup ---")
-    setup_code = """!git clone https://github.com/qninhdt/lexi-research.git || (cd lexi-research && git pull)
-%cd lexi-research
+    setup_code = """!git clone https://github.com/qninhdt/lexi-research.git /content/lexi-research || (cd /content/lexi-research && git pull)
+%cd /content/lexi-research
 !pip install -r requirements-colab.txt"""
     add_1 = await client.call_tool("add_code_cell", {"cellIndex": 1, "language": "python", "code": setup_code})
     print("Add Setup cell result:", add_1)

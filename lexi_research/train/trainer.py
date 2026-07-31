@@ -25,6 +25,7 @@ def train(
         from transformers import (  # type: ignore[import-not-found]
             AutoModelForCausalLM,
             AutoTokenizer,
+            BitsAndBytesConfig,
             TrainingArguments,
         )
         from trl import SFTTrainer  # type: ignore[import-not-found]
@@ -35,8 +36,17 @@ def train(
     examples = [training_example(row) for row in rows]
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     tokenizer.pad_token = tokenizer.eos_token
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, load_in_4bit=True, torch_dtype=torch.bfloat16, device_map="auto"
+        base_model,
+        quantization_config=quantization_config,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
     )
     model = get_peft_model(
         model,
