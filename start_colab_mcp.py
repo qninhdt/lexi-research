@@ -101,7 +101,7 @@ async def main():
         
         token = proxy.wss.token
         port = proxy.wss.port
-        url = f"{COLAB}{SCRATCH_PATH}?authuser=3#mcpProxyToken={token}&mcpProxyPort={port}"
+        url = f"https://colab.research.google.com/u/3{SCRATCH_PATH}?authuser=3#mcpProxyToken={token}&mcpProxyPort={port}"
         
         print("\n" + "="*75)
         print("🚀 COLAB MCP AUTOMATION RUNNER")

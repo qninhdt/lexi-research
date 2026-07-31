@@ -18,7 +18,8 @@ dist/
 
 # Data artifacts are DVC-tracked, never Git-tracked. Cambridge-derived text is
 # private (redistribution rights unverified).
-data/
+data/*
+!data/*.py
 *.parquet
 *.sqlite
 *.db

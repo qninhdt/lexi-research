@@ -1,0 +1,18 @@
+[
+  {"id":"vi-a2-foundations","l1":"Vietnamese","cefr":"A2","error_bias":["art","agr","tense","num"],"length":"short","traits":"often omits articles and inflections; uses simple present where time needs marking"},
+  {"id":"vi-b1-articles","l1":"Vietnamese","cefr":"B1","error_bias":["art","agr","tense"],"length":"short","traits":"omits articles; overuses present simple; uses word-for-word L1 phrasing"},
+  {"id":"vi-b2-prepositions","l1":"Vietnamese","cefr":"B2","error_bias":["prep","coll","word"],"length":"medium","traits":"writes fluent clauses but chooses prepositions and collocations literally"},
+  {"id":"ja-a2-marking","l1":"Japanese","cefr":"A2","error_bias":["art","num","prep"],"length":"short","traits":"drops articles and plural marking and has uncertain preposition choices"},
+  {"id":"ja-b1-order","l1":"Japanese","cefr":"B1","error_bias":["art","num","order"],"length":"medium","traits":"uses understandable vocabulary with article, number, and word-order transfer"},
+  {"id":"ja-b2-natural","l1":"Japanese","cefr":"B2","error_bias":["prep","coll","unnat"],"length":"medium","traits":"is mostly accurate but produces literal collocations and formally odd phrasing"},
+  {"id":"es-a2-agreement","l1":"Spanish","cefr":"A2","error_bias":["agr","order","word"],"length":"short","traits":"transfers agreement and adjective order and sometimes selects a false friend"},
+  {"id":"es-b1-forms","l1":"Spanish","cefr":"B1","error_bias":["tense","form","word"],"length":"medium","traits":"has plausible sentences with tense, word-form, and false-friend errors"},
+  {"id":"es-b2-collocation","l1":"Spanish","cefr":"B2","error_bias":["coll","prep","unnat"],"length":"medium","traits":"uses the right idea but relies on direct translations and non-native collocations"},
+  {"id":"ar-a2-copula","l1":"Arabic","cefr":"A2","error_bias":["agr","art","order"],"length":"short","traits":"may omit copulas and articles and transfer verb-first ordering"},
+  {"id":"ar-b1-definiteness","l1":"Arabic","cefr":"B1","error_bias":["art","agr","prep"],"length":"medium","traits":"has persistent definiteness, agreement, and preposition errors"},
+  {"id":"ar-b2-register","l1":"Arabic","cefr":"B2","error_bias":["order","coll","unnat"],"length":"medium","traits":"communicates clearly but retains L1-influenced order and register choices"},
+  {"id":"advanced-c1-collocations","l1":"none","cefr":"C1","error_bias":["coll","unnat"],"length":"medium","traits":"is grammatically strong and makes only subtle collocation or register errors"},
+  {"id":"advanced-c1-word-choice","l1":"none","cefr":"C1","error_bias":["word","coll"],"length":"medium","traits":"is near-native but occasionally chooses a plausible yet non-idiomatic word"},
+  {"id":"advanced-c1-phrasing","l1":"none","cefr":"C1","error_bias":["unnat","word"],"length":"short","traits":"uses accurate grammar with occasional concise but unnatural phrasing"},
+  {"id":"advanced-c1-particles","l1":"none","cefr":"C1","error_bias":["part","coll","unnat"],"length":"medium","traits":"is almost native-like but makes subtle phrasal-particle and collocation mistakes"}
+]
