@@ -48,6 +48,41 @@ uv run ruff check .
 
 Requires Python >= 3.10.
 
+## Two training stages
+
+The student learns the correction format from a human-annotated learner corpus,
+and the sense-dependent fields from the teacher.
+
+| | Stage A | Stage B |
+|---|---|---|
+| Data | W&I+LOCNESS, converted by code | teacher-generated |
+| Rows | ~19k | ~1.5k |
+| Teaches | `correction` markup, tag set | `meaning`, `feedback`, `coll` |
+| Prompt | `train/prompts/corrector_*` | `render_grader_prompt` — the served one |
+| API cost | none | the whole budget |
+
+Stage A needs no teacher endpoint. It reads M2 annotations, maps ERRANT types
+onto the 16 tags, and re-renders each sentence in the inline format; 98.8% of
+34,308 sentences convert, and every row is read back with `parse_correction` so
+a detokenisation bug cannot enter the dataset as training signal.
+
+```bash
+uv run lexi data gec-import --corpus data/corpora/wi_locness --out data/gec
+```
+
+The corpus is [W&I+LOCNESS v2.1](https://www.cl.cam.ac.uk/research/nl/bea2019st/),
+licensed for **non-commercial research and education**. It is not redistributed
+here: the importer reads a local copy, records its SHA-256 in the report, and
+`data/` is gitignored. Cite Yannakoudakis et al. 2018 in anything published from
+it.
+
+Two tags do not survive the conversion in the same way. ERRANT has no
+collocation type, so `coll` never appears in stage A and is taught in stage B
+alone. `R:OTHER` is 9.3% of edits — above the 5% at which gate G5 calls the
+taxonomy broken — and 71% of it is multi-token rewriting, so it is split on edit
+length into `unnat` and `word`. That split is a heuristic standing in for a
+judgement the corpus does not record, and it is why `other` reports 0%.
+
 ## Running the pipeline
 
 Copy `.env.example` to `.env` and set the local source database plus an
