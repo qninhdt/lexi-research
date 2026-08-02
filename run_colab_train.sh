@@ -90,6 +90,24 @@ esac
 BATCH_SIZE="${BATCH_SIZE:-${DEFAULT_BATCH_SIZE}}"
 GRAD_ACCUM="${GRAD_ACCUM:-${DEFAULT_GRAD_ACCUM}}"
 
+# Extra `--override key.path=value` pairs, space-separated. Stage A needs
+# `train.task=corrector`, which selects the correction-only collator and prompt:
+#
+#   TRAIN_PATH=data/gec/train.parquet MAX_STEPS=0 \
+#     EXTRA_OVERRIDES="train.task=corrector train.rubric=terse train.thinking=off" \
+#     bash run_colab_train.sh L4 qwen
+#
+# Restricted to the same character class as the other embedded values, because
+# these land inside a remote Python snippet and a shell metacharacter here would
+# become code there.
+EXTRA_OVERRIDES="${EXTRA_OVERRIDES:-}"
+case "${EXTRA_OVERRIDES}" in
+  *[!A-Za-z0-9_.=\ -]*)
+    echo "EXTRA_OVERRIDES may contain only letters, digits, '_', '.', '=', '-', and spaces." >&2
+    exit 2
+    ;;
+esac
+
 case "${GPU_KEY}" in
   L4) REQUIREMENTS_FILE="requirements-colab-l4.txt" ;;
   *) REQUIREMENTS_FILE="requirements-colab.txt" ;;
@@ -164,7 +182,12 @@ echo "--- [1/5] Provisioning Colab VM (GPU=${GPU}) ---"
 # cleanup above) precisely so a resume can pick up the checkpoints already on
 # its disk; provisioning a fresh VM instead would start from an empty directory
 # and `--resume auto` would silently begin at step 0.
-if colab status -s "${SESSION}" >/dev/null 2>&1; then
+#
+# The exit status of `colab status` cannot be used for this: it returns 0 for a
+# session that does not exist, printing "not found" to stdout. Testing it alone
+# sent every first run down the reuse path, which skipped provisioning and then
+# failed at the GPU check against a VM that was never created.
+if colab status -s "${SESSION}" 2>&1 | grep -qv "not found"; then
   echo "Reusing live session '${SESSION}' and whatever it has already written."
   REUSED_SESSION=1
 else
@@ -258,6 +281,9 @@ cmd = [
     "--override", "train.grad_accum=${GRAD_ACCUM}",
     "--resume", "${RESUME}",
 ]
+
+for pair in "${EXTRA_OVERRIDES}".split():
+    cmd += ["--override", pair]
 
 if "${GPU_KEY}" == "L4":
     # L4 fits this 4B hybrid model with recomputation; without it, the
