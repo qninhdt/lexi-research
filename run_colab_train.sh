@@ -264,6 +264,13 @@ else:
 cmds += [
     "python -m pip install --disable-pip-version-check -q -r /content/lexi-research/${REQUIREMENTS_FILE}",
     "python -m pip install --disable-pip-version-check -q pydantic jinja2 openai httpx fastapi uvicorn",
+    # Colab's base image ships torchao 0.10.0. PEFT's dispatcher calls
+    # `is_torchao_available`, which *raises* ImportError below its 0.16 minimum
+    # instead of returning False, so any `PeftModel.from_pretrained` that walks
+    # the full dispatcher list dies. Nothing here quantises with torchao —
+    # bitsandbytes does the 4-bit work — so removing it is the fix rather than
+    # upgrading into a version nothing was tested against.
+    "python -m pip uninstall -y -q torchao || true",
 ]
 for cmd in cmds:
     print(f"\n>>> {cmd}", flush=True)
@@ -330,7 +337,8 @@ esac
 # ── 4. Train ─────────────────────────────────────────────
 echo ""
 echo "--- [4/5] Running QLoRA training ---"
-cat <<PYTRAIN | colab exec -s "${SESSION}" --timeout "${EXEC_TIMEOUT}"
+TRAIN_LOG="$(mktemp)"
+cat <<PYTRAIN | colab exec -s "${SESSION}" --timeout "${EXEC_TIMEOUT}" | tee "${TRAIN_LOG}"
 import os
 import subprocess
 import sys
@@ -391,6 +399,16 @@ if result.returncode:
 print("\n✅ Training complete!", flush=True)
 PYTRAIN
 
+# `colab exec` exits 0 even when the remote cell raises, so the sentinel above is
+# the only evidence the training actually ran. Without this check a session that
+# died mid-run — the proxy token expires after about an hour — printed a "Done!"
+# banner over an empty output directory.
+if ! sed 's/\x1b\[[0-9;]*m//g' "${TRAIN_LOG}" | grep -q "Training complete"; then
+  echo "❌ Training did not complete. Last lines:" >&2
+  tail -25 "${TRAIN_LOG}" >&2
+  exit 1
+fi
+
 # ── 4b. Generation check ─────────────────────────────────
 # A finished run and a working model are different claims. Loss falls smoothly
 # while a model emits unparseable markup, so `SMOKE_CHECK=1` loads the adapter
@@ -400,7 +418,8 @@ PYTRAIN
 if [ "${SMOKE_CHECK:-0}" = "1" ]; then
   echo ""
   echo "--- [4b/5] Checking the adapter generates parseable markup ---"
-  cat <<PYCHECK | colab exec -s "${SESSION}" --timeout 900
+  SMOKE_CHECK_LOG="$(mktemp)"
+  cat <<PYCHECK | colab exec -s "${SESSION}" --timeout 900 | tee "${SMOKE_CHECK_LOG}"
 import os, sys
 os.chdir("/content/lexi-research")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -443,6 +462,14 @@ else:
     print(f"parses: {len(parsed.edits)} edit(s); strip == input: {parsed.text == text}")
 print("\n✅ Generation path works", flush=True)
 PYCHECK
+  # `colab exec` reports the CLI's own success, not the remote snippet's: a
+  # traceback inside the cell still exits 0. So the snippet prints a sentinel and
+  # the launcher looks for it, rather than trusting a status that cannot fail.
+  if ! sed 's/\x1b\[[0-9;]*m//g' "${SMOKE_CHECK_LOG}" | grep -q "Generation path works"; then
+    echo "❌ The generation check did not complete. Last lines:" >&2
+    tail -20 "${SMOKE_CHECK_LOG}" >&2
+    exit 1
+  fi
 fi
 
 # ── 5. Download & cleanup ────────────────────────────────
@@ -457,9 +484,36 @@ case "${REMOTE_OUTPUT_DIR}" in
   "") REMOTE_FETCH_PATH="/content/lexi-research/${OUTPUT_DIR}" ;;
   *)  REMOTE_FETCH_PATH="/content/lexi-research/${REMOTE_OUTPUT_DIR}" ;;
 esac
-colab download -s "${SESSION}" \
-  "${REMOTE_FETCH_PATH}" "${OUTPUT_DIR}" \
-  || echo "⚠️  Download failed or no output files"
+# `colab download` transfers a single file — it refuses a directory outright —
+# so the adapter is tarred on the VM first. Before this it always printed
+# "Cannot download a directory" and the run ended with an empty output dir under
+# a "Done!" banner.
+echo ">>> packing the adapter on the VM"
+cat <<PYPACK | colab exec -s "${SESSION}" --timeout 600
+import os, subprocess, sys, tarfile
+
+source = "${REMOTE_FETCH_PATH}"
+if not os.path.isdir(source):
+    print(f"❌ {source} does not exist; the run wrote nothing", flush=True)
+    sys.exit(1)
+
+archive = "/content/adapter.tar.gz"
+with tarfile.open(archive, "w:gz") as tar:
+    tar.add(source, arcname=".")
+size = os.path.getsize(archive)
+print(f">>> packed {source} -> {archive} ({size / 1e6:.1f} MB)", flush=True)
+if size == 0:
+    sys.exit(1)
+PYPACK
+
+if colab download -s "${SESSION}" /content/adapter.tar.gz "${OUTPUT_DIR}/adapter.tar.gz"; then
+  tar xzf "${OUTPUT_DIR}/adapter.tar.gz" -C "${OUTPUT_DIR}"
+  rm -f "${OUTPUT_DIR}/adapter.tar.gz"
+  echo "✅ adapter in ${OUTPUT_DIR}/"
+  ls -la "${OUTPUT_DIR}" | head
+else
+  echo "⚠️  Download failed or no output files"
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
