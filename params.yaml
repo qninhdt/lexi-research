@@ -74,23 +74,78 @@ train:
   base_model: Qwen/Qwen3.5-4B
   # The rubric in the grader system prompt is long: a rendered example measures
   # ~1250 whitespace tokens before subword splitting, so the previous 1024 would
-  # have dropped every row. Headroom here covers a subword tokenizer, a longer
-  # learner sentence, and a reasoning block.
-  max_seq_len: 4096
+  # have dropped every row. Real examples tokenise to about 1.5k, so 2048 covers
+  # a longer learner sentence and a reasoning block with room to spare.
+  #
+  # Batches are padded to their own longest row, not to this limit, so lowering
+  # it does not speed up a typical batch. What it does is bound the worst case:
+  # one 4k-token outlier would otherwise stretch every sequence batched with it
+  # to 4k. `max_drop_fraction` below is the guard — if a corpus ever needs more
+  # than this, the run stops rather than quietly training on the short rows.
+  max_seq_len: 2048
   # Rows over the limit are dropped, and dropping is length-biased. Past this
   # share the remaining data is a different distribution, so the run stops.
   max_drop_fraction: 0.02
-  lora_r: 32
-  lora_alpha: 64
+  # Rank 8 with alpha 32 follows the current ms-swift dense Qwen3.5 recipe, and
+  # cuts the adapter and its optimizer state relative to the rank 32 this
+  # replaced. Alpha tracks rank at 4x so the LoRA scaling (alpha / r) stays put;
+  # changing rank alone would also change the effective update size and confound
+  # a rank comparison with a learning-rate one.
+  #
+  # This is a capacity decision, not a free speed win: if format validity or
+  # meaning agreement drops against a rank 32 arm on the real corpus, rank is
+  # the first thing to put back. Ablation A6 varies `target_modules`, and this
+  # value belongs to the same family of questions.
+  lora_r: 8
+  lora_alpha: 32
   lora_dropout: 0.05
   learning_rate: 1.0e-4
   epochs: 2
-  per_device_batch_size: 4
-  grad_accum: 8
+  # Effective batch is the product of these two, and is what the learning rate
+  # was chosen against; change one and the other must absorb it.
+  #
+  # This default is the one that fits the *tighter* of the two target models.
+  # Measured on a Colab L4 (22 GiB), 2 optimiser steps over 64 sequences,
+  # text-only QLoRA:
+  #
+  #   Qwen3.5-4B     batch 4  ->  9.5 GiB peak,  171 s   (fastest)
+  #   Qwen3.5-4B     batch 8  -> 13.9 GiB peak,  238 s   (slower again)
+  #   Gemma 4 E4B-it batch 1  -> 20.6 GiB peak,  220 s
+  #   Gemma 4 E4B-it batch 4  -> out of memory
+  #
+  # Gemma 4 E4B-it has almost no headroom left at batch 1, so a global default
+  # above 1 would break it. `run_colab_train.sh` raises the batch for Qwen,
+  # where the same effective batch of 32 is reached with accumulation 8 and
+  # measurably less wall-clock. Raise this only for a model verified to fit.
+  per_device_batch_size: 1
+  grad_accum: 32
   warmup_ratio: 0.03
   seed: 20260729
   logging_steps: 10
   save_steps: 100
+  # Native PyTorch SDPA uses the L4's fused attention kernels on the model's
+  # full-attention blocks. Linear-attention blocks keep their own fused path.
+  attn_implementation: sdpa
+  # `auto` selects fused AdamW on CUDA and the portable implementation on CPU.
+  # This changes kernel fusion only; the optimizer update and hyperparameters
+  # remain the same.
+  optimizer: auto
+  # Disabled by default: this is an optional A/B because Inductor compilation
+  # can cost substantial startup time and VRAM on QLoRA + checkpointing.
+  torch_compile: false
+  torch_compile_backend: null
+  torch_compile_mode: null
+  # Qwen's causal-LM head accepts `logits_to_keep`; this projects only the
+  # completion window while preserving the exact completion-only CE objective.
+  selective_logits: true
+  # Fused RMSNorm/SwiGLU/RoPE and a chunked cross-entropy from Liger. The
+  # attraction here is the head: a 248,320-entry vocabulary over hidden size
+  # 2560 makes the logit projection and its softmax a large share of both time
+  # and memory. Off by default until measured on this exact stack, because Liger
+  # patches modules in place and this trainer computes its own completion-only
+  # CE — a fused loss that ignored `logits_to_keep` would silently change the
+  # objective rather than just the speed.
+  use_liger_kernel: false
   # In-loop evaluation interval. Loss falls smoothly while format validity
   # collapses, so the harness runs during training rather than after it. 0 is off.
   eval_steps: 200
@@ -98,10 +153,27 @@ train:
   # whose arms were scored on different rows is not an ablation.
   eval_subset: 32
   gradient_checkpointing: true
+  # Non-reentrant checkpointing is lower-overhead on current PyTorch, but keep
+  # the switch explicit so a timing ablation can reject it if backward is slower.
+  gradient_checkpointing_use_reentrant: false
   # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
   # gate sets it to 2.
   max_steps: 0
   load_in_4bit: true
+  # The dataset is text-only. Keep the model's language stack and discard the
+  # unused vision/audio towers after loading; set false only for multimodal data.
+  text_only: true
+  # Nested quantisation saves a little VRAM but adds dequantisation work. L4 has
+  # enough headroom for the faster single-quant path.
+  bnb_4bit_use_double_quant: false
+  # Ampere+ cards such as L4 can use TF32 for the remaining fp32 matmuls.
+  tf32: true
+  # Pretokenised examples make worker prefetch useful on a GPU; the launcher
+  # raises this to 2 for L4 while CPU smoke keeps the portable value of 0.
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  dataloader_persistent_workers: false
+  dataloader_prefetch_factor: 2
   # `attn` | `attn+mlp` | `all-linear`, or an explicit list of module-name
   # patterns for a stack the layout below misreads. Ablation A6's arms.
   target_modules: all-linear
@@ -112,6 +184,8 @@ train:
   # template's reasoning path open but supervises an empty block, which is what
   # separates "reasoning helps" from "the scaffold alone helps". Quoted: YAML
   # reads a bare `on` as the boolean true.
+  # Keep the reasoning path used by the model and the ablation design. Speed
+  # optimisations must not replace this with a smaller objective.
   thinking: "on"
   # How to read a decoder stack, as substring matches on one dotted path
   # component each. One set of conventions therefore covers `self_attn`,
@@ -218,6 +292,17 @@ rl:
 eval:
   max_new_tokens: 256
   temperature: 0.0
+  # Rows decoded per `generate` call. Prompts are left-padded into one batch, so
+  # the batch decodes for as long as its slowest row needs while paying prefill
+  # and kernel-launch cost once instead of once per row. Measured on an L4 over
+  # 16 fixture rows: 208 s at 1, 39 s at 8. This is what makes the in-loop eval
+  # cheap enough to leave switched on.
+  #
+  # Batch size changes bf16 reduction order, so a greedy completion can drift
+  # token-for-token from a serial one (measured: 5/8 rows identical, 8/8 parsing
+  # to the same answer JSON). Set this to 1 when byte-stable `raw` text matters
+  # more than speed.
+  batch_size: 8
   # One retry on an invalid answer. The count lands in the report: a student that
   # needs two attempts is a different product than one that needs none.
   max_retries: 1
