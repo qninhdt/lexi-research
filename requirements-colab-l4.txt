@@ -1,0 +1,32 @@
+# Reproducible Colab L4 stack for Qwen3.5's hybrid linear/full attention.
+# The cp311 native wheel below is intentional: Python 3.12 is not forbidden,
+# but this exact CUDA extension matrix is the one exercised in the L4 smoke.
+--index-url https://download.pytorch.org/whl/cu126
+--extra-index-url https://pypi.org/simple
+
+torch==2.7.1
+torchvision==0.22.1
+torchaudio==2.7.1
+transformers==5.14.1
+datasets
+trl
+peft==0.20.0
+bitsandbytes==0.50.0
+accelerate
+wandb
+pyarrow
+ninja
+packaging
+psutil
+# Rust-backed parallel downloader for the Hub. A fresh Colab VM has no model
+# cache, so every session pays a full checkpoint download; with this enabled
+# (HF_HUB_ENABLE_HF_TRANSFER=1, set by the launcher) the 4B Qwen3.5 checkpoint
+# measured 39.7 s. It only affects transfer speed, not what is downloaded.
+hf_transfer
+flash-linear-attention[cuda]==0.5.2
+# Qwen3.5's Gated DeltaNet uses both extensions. Select the wheel matching
+# Colab's Python minor version instead of silently compiling a slow fallback.
+causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1%2Bcu12torch2.7cxx11abiTRUE-cp310-cp310-linux_x86_64.whl ; python_version == "3.10"
+causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1%2Bcu12torch2.7cxx11abiTRUE-cp311-cp311-linux_x86_64.whl ; python_version == "3.11"
+causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1%2Bcu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; python_version == "3.12"
+causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1%2Bcu12torch2.7cxx11abiTRUE-cp313-cp313-linux_x86_64.whl ; python_version == "3.13"
