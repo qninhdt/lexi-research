@@ -265,9 +265,9 @@ cmds += [
     "python -m pip install --disable-pip-version-check -q -r /content/lexi-research/${REQUIREMENTS_FILE}",
     "python -m pip install --disable-pip-version-check -q pydantic jinja2 openai httpx fastapi uvicorn",
     # Colab's base image ships torchao 0.10.0. PEFT's dispatcher calls
-    # `is_torchao_available`, which *raises* ImportError below its 0.16 minimum
-    # instead of returning False, so any `PeftModel.from_pretrained` that walks
-    # the full dispatcher list dies. Nothing here quantises with torchao —
+    # is_torchao_available, which *raises* ImportError below its 0.16 minimum
+    # instead of returning False, so loading an adapter back walks the full
+    # dispatcher list and dies. Nothing here quantises with torchao —
     # bitsandbytes does the 4-bit work — so removing it is the fix rather than
     # upgrading into a version nothing was tested against.
     "python -m pip uninstall -y -q torchao || true",
