@@ -98,6 +98,14 @@ def _handle_data_label(config: Config, args: argparse.Namespace) -> int:
     )
 
 
+def _handle_data_gec_import(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_gec_import
+
+    return _report(
+        "gec_import", config, run_gec_import(config, corpus=args.corpus, out=args.out)
+    )
+
+
 def _handle_data_process(config: Config, args: argparse.Namespace) -> int:
     from lexi_research.data.stages import run_process
 
@@ -511,6 +519,15 @@ def build_parser() -> argparse.ArgumentParser:
     label.add_argument("--out", default="data/raw")
     label.add_argument("--cache", default=".cache/teacher")
     label.set_defaults(handler=_handle_data_label)
+
+    gec = data.add_parser(
+        "gec-import",
+        parents=[common],
+        help="stage A: convert a learner corpus into the edit format (no teacher)",
+    )
+    gec.add_argument("--corpus", default="data/corpora/wi_locness")
+    gec.add_argument("--out", default="data/gec")
+    gec.set_defaults(handler=_handle_data_gec_import)
 
     process = data.add_parser(
         "process", parents=[common], help="validate, balance and split in one pass"

@@ -11,12 +11,16 @@ is why the first two are declared in `dvc.yaml` but never run in CI.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from lexi_research.cli.config import Config
 from lexi_research.format import BandConfig, default_config_path
@@ -188,6 +192,70 @@ def run_label(
     return report
 
 
+def run_gec_import(
+    config: Config, *, corpus: str | Path, out: str | Path
+) -> dict[str, Any]:
+    """Stage A: convert a human-annotated learner corpus into the edit format.
+
+    Pure and free. Unlike `generate` and `label` it reaches no endpoint, so it can
+    run in CI and its output does not depend on a provider being up.
+
+    The rows it writes carry `correction` but neither `meaning` nor `feedback`,
+    which is why they go to their own directory and their own parquet rather than
+    joining `data/clean/`: a row missing two of the three answer fields would fail
+    `validate_output` and has no business in the artifact stage B trains on.
+    """
+    from .gec_import import import_corpus
+
+    section = dict(config.section("gec"))
+    rows, report = import_corpus(
+        corpus,
+        seed=int(section["seed"]),
+        max_stratum_share=float(section["max_stratum_share"]),
+        val_share=float(section["val_share"]),
+        min_words=int(section["min_words"]),
+        min_conversion_rate=float(section["min_conversion_rate"]),
+    )
+
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for split in ("train", "val"):
+        subset = [row for row in rows if row["split"] == split]
+        if not subset:
+            raise StageError(f"the {split} split is empty; check gec.val_share")
+        pq.write_table(pa.Table.from_pylist(subset), out_dir / f"{split}.parquet")
+
+    report["corpus_sha256"] = _corpus_digest(corpus)
+    report["corrector_prompt_hash"] = _corrector_prompt_hash()
+    write_report(out_dir / "gec-import-report.json", report)
+    return report
+
+
+def _corpus_digest(corpus: str | Path) -> str:
+    """SHA-256 over the M2 files, so a corpus swap invalidates the artifact.
+
+    Hashes the files that were read rather than the directory: the tarball also
+    ships JSON and licence text, and a change to those does not change the rows.
+    """
+    from .gec_import import TRAIN_FILES
+
+    digest = hashlib.sha256()
+    for name, _ in TRAIN_FILES:
+        path = Path(corpus) / "m2" / name
+        digest.update(name.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _corrector_prompt_hash() -> str:
+    """Recorded in the report so a prompt edit is visible in the artifact's lineage."""
+    from lexi_research.train.corrector_prompt import corrector_prompt_hash
+
+    return corrector_prompt_hash()
+
+
 def run_process(
     config: Config,
     *,
@@ -327,6 +395,7 @@ def run_calibrate(
 __all__ = [
     "StageError",
     "run_calibrate",
+    "run_gec_import",
     "run_generate",
     "run_label",
     "run_process",

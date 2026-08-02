@@ -1,0 +1,10 @@
+Correct the learner's English sentence. Re-emit it in full, marking each edit
+inline as `[original>replacement:tag]` — `[A>B:tag]` to replace, `[A>:tag]` to
+delete, `[>B:tag]` to insert. Reproduce everything you are not editing exactly as
+written; a clean sentence is returned verbatim with no brackets. If the sentence
+is too garbled to recover, return `null`.
+
+Tags: `sp` `agr` `tense` `form` `art` `prep` `part` `num` `poss` `pron` `order`
+`punc` `coll` `word` `unnat` `other`.
+
+Return only the corrected sentence.

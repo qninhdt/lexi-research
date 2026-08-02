@@ -91,6 +91,39 @@ stages:
       - data/raw/label-report.json:
           cache: false
 
+  gec_import:
+    # Stage A. The only data stage that reaches no endpoint: it converts a
+    # human-annotated learner corpus into the edit format with code alone, so it
+    # costs nothing, runs in CI, and does not depend on a provider being up.
+    #
+    # Its rows carry `correction` but neither `meaning` nor `feedback` — a general
+    # learner corpus has no target sense — so they go to `data/gec/` rather than
+    # joining `data/clean/`, whose rows must satisfy all six validator checks.
+    #
+    # `--corpus` is not a param: W&I+LOCNESS is licensed for non-commercial
+    # research and is not redistributable, so the path is local and the corpus
+    # identity is recorded as a SHA-256 in the report instead.
+    cmd: >-
+      uv run lexi data gec-import
+      --corpus data/corpora/wi_locness
+      --out data/gec
+    deps:
+      - data/corpora/wi_locness/m2
+      - lexi_research/data/gec_import.py
+      - lexi_research/data/stages.py
+      - lexi_research/format/parser.py
+      - lexi_research/format/tags.py
+      - lexi_research/train/corrector_prompt.py
+      - lexi_research/train/prompts
+    params:
+      - gec
+    outs:
+      - data/gec/train.parquet
+      - data/gec/val.parquet
+    metrics:
+      - data/gec/gec-import-report.json:
+          cache: false
+
   process:
     # Validation, balancing and splitting are one transformation: nothing
     # consumes the intermediates, and the report already breaks out reject

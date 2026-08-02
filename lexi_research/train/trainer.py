@@ -23,7 +23,14 @@ from lexi_research.cli.config import Config
 
 from .callbacks import resolve_resume
 from .collate import IGNORE_INDEX, Example, SequenceTooLong, build_example
+from .collate_corrector import build_corrector_example
 from .modules import Layout, TargetResolution, resolve_target_modules
+
+#: The two supervised tasks. `grader` is stage B — the three-field answer behind
+#: the prompt that is actually served. `corrector` is stage A, which learns the
+#: markup and the tag set from a human-annotated learner corpus that has no
+#: target sense and therefore no `meaning` and no `feedback`.
+TASKS = ("grader", "corrector")
 
 
 class TrainerSetupError(RuntimeError):
@@ -69,6 +76,8 @@ def build_examples(
     max_seq_len: int,
     thinking: str,
     completion_only: bool,
+    task: str = "grader",
+    rubric: str = "full",
     max_drop_fraction: float = 0.02,
 ) -> tuple[list[Example], int]:
     """Tokenise every row, dropping and counting the ones that do not fit.
@@ -77,11 +86,31 @@ def build_examples(
     survive — so past a threshold the run trains on a different distribution than
     the one it claims to. That is a wrong answer rather than a slow one, so it
     raises instead of warning.
+
+    `task` selects the collator. `grader` is the three-field answer behind the
+    served prompt; `corrector` is stage A, where the corpus supplies a correction
+    and nothing else. They are separate functions rather than a flag inside one
+    because the grader path is the inference contract, and a training-only branch
+    inside it is how that contract drifts.
     """
+    if task not in TASKS:
+        raise TrainerSetupError(f"train.task={task!r}; expected one of {list(TASKS)}")
+
     examples: list[Example] = []
     dropped = 0
     for row in rows:
         try:
+            if task == "corrector":
+                examples.append(
+                    build_corrector_example(
+                        tokenizer,
+                        row,
+                        thinking=thinking,
+                        max_seq_len=max_seq_len,
+                        rubric=rubric,
+                    )
+                )
+                continue
             examples.append(
                 build_example(
                     tokenizer,
@@ -476,6 +505,8 @@ def train_sft(
         max_seq_len=config.get_int("train.max_seq_len"),
         thinking=config.get_str("train.thinking"),
         completion_only=config.get_bool("train.completion_only"),
+        task=config.get_str("train.task"),
+        rubric=config.get_str("train.rubric"),
         max_drop_fraction=config.get_float("train.max_drop_fraction"),
     )
     supervised = sum(example.supervised_tokens for example in examples)
@@ -544,6 +575,14 @@ def train_sft(
     )
     if val_rows:
         from .callbacks import build_eval_callback
+
+        if config.get_str("train.task") != "grader":
+            raise TrainerSetupError(
+                "in-loop evaluation decodes through the grader prompt and scores a "
+                "three-field answer, so it cannot read stage-A rows. Run stage A "
+                "without --val, and measure the adapter with `lexi eval` after "
+                "stage B has trained the fields the harness reports."
+            )
 
         trainer.add_callback(
             build_eval_callback(

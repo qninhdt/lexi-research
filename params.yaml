@@ -53,6 +53,30 @@ balance:
   # Cap on any one (meaning, error bucket) stratum, as a share of the dataset.
   max_stratum_share: 0.15
 
+# Stage A: the human-annotated learner corpus, converted rather than generated.
+# Costs nothing and supplies ~20x the rows of the teacher-graded set, but carries
+# no `meaning` and no `feedback` — a general learner corpus has no target sense —
+# so it teaches the markup and the tag set only.
+gec:
+  seed: 20260729
+  # Cap per edit-count bucket. Measured: 32.6% of W&I sentences need no edit at
+  # all, and a sentence re-emitted verbatim is the cheapest thing a model can
+  # learn. At 0.15 the four buckets come out level and ~20k rows survive.
+  #
+  # The key is the bucket alone. Adding `cefr` was measured and does nothing:
+  # twelve strata, none reaching the cap, 105 of 33,081 rows removed.
+  max_stratum_share: 0.15
+  # No test split. What the project reports is measured on the teacher-graded
+  # test set, whose prompt and label set are the ones actually served.
+  val_share: 0.05
+  # W&I is essays split into sentences, and the split leaves headings, names and
+  # sign-offs behind — 2.6% of rows, 83% of them needing no edit. They are not
+  # sentences, and they would spend the `clean` budget on echoing proper nouns.
+  min_words: 3
+  # Conversion below this means the mapping or the detokenisation regressed, not
+  # that the corpus changed. Measured at 0.988 on W&I+LOCNESS v2.1.
+  min_conversion_rate: 0.95
+
 split:
   version: v1
   seed: 20260729
@@ -180,6 +204,28 @@ train:
   # Loss over the answer only. False supervises the prompt too — ablation A7,
   # and the behaviour of the trainer this one replaced.
   completion_only: true
+  # Which supervised task, and therefore which collator and which prompt.
+  #
+  # `grader`    stage B: the three-field answer behind the prompt that is served.
+  # `corrector` stage A: the correction alone, from a human-annotated learner
+  #             corpus that has no target sense and so no meaning and no
+  #             feedback. Its prompt is ~28% shorter, which over ~19k rows is
+  #             the difference between a run that fits an L4 session and one
+  #             that does not.
+  #
+  # Stage A must run without `--val`: in-loop evaluation decodes through the
+  # grader prompt and scores three fields, and the trainer refuses rather than
+  # scoring stage-A rows against a contract they do not carry.
+  task: grader
+  # How much of the tag set the stage-A prompt explains. `full` documents all 16;
+  # `terse` names them and lets ~19k examples teach what each means.
+  #
+  # Not a style choice. Measured with the Qwen tokenizer over 2,000 rows: the
+  # learner sentence averages 14 tokens and the answer 14, while the full rubric
+  # is 915 — so 97% of every sequence is a prompt supplied verbatim at inference,
+  # and only 1.5% of tokens carry loss. At the L4 rate in the README that is
+  # ~17 hours for `full` against ~1 for `terse`. Ignored when `task: grader`.
+  rubric: full
   # Ablation A2: `on`, `off`, or `forced-empty`. The third arm keeps the
   # template's reasoning path open but supervises an empty block, which is what
   # separates "reasoning helps" from "the scaffold alone helps". Quoted: YAML
