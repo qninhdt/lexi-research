@@ -108,6 +108,21 @@ case "${EXTRA_OVERRIDES}" in
     ;;
 esac
 
+# Which branch the VM checks out. It clones from GitHub rather than uploading the
+# working tree, so an unpushed commit is invisible to the run — defaulting to the
+# local branch makes that failure mode much harder to hit than defaulting to main.
+BRANCH="${BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+case "${BRANCH}" in
+  *[!A-Za-z0-9_./-]*|"")
+    echo "BRANCH may contain only letters, digits, '_', '.', '/', and '-'." >&2
+    exit 2
+    ;;
+esac
+if ! git diff --quiet HEAD 2>/dev/null; then
+  echo "warning: the working tree has uncommitted changes; the VM clones" >&2
+  echo "         '${BRANCH}' from GitHub and will not see them." >&2
+fi
+
 case "${GPU_KEY}" in
   L4) REQUIREMENTS_FILE="requirements-colab-l4.txt" ;;
   *) REQUIREMENTS_FILE="requirements-colab.txt" ;;
@@ -214,9 +229,15 @@ import subprocess
 repo = "/content/lexi-research"
 if os.path.isdir(repo + "/.git"):
     print(">>> repo present; fetching instead of cloning", flush=True)
-    cmds = [f"git -C {repo} fetch --depth 1 origin && git -C {repo} reset --hard origin/HEAD"]
+    cmds = [
+        f"git -C {repo} fetch --depth 1 origin ${BRANCH} && "
+        f"git -C {repo} reset --hard origin/${BRANCH}"
+    ]
 else:
-    cmds = [f"git clone --depth 1 https://github.com/qninhdt/lexi-research.git {repo}"]
+    cmds = [
+        f"git clone --depth 1 --branch ${BRANCH} "
+        f"https://github.com/qninhdt/lexi-research.git {repo}"
+    ]
 cmds += [
     "python -m pip install --disable-pip-version-check -q -r /content/lexi-research/${REQUIREMENTS_FILE}",
     "python -m pip install --disable-pip-version-check -q pydantic jinja2 openai httpx fastapi uvicorn",
@@ -240,6 +261,48 @@ except Exception as exc:
     print(f"causal-conv1d: unavailable ({type(exc).__name__}: {exc})")
 print("\n✅ Environment ready", flush=True)
 PYSETUP
+
+# ── 3b. Stage-A corpus ───────────────────────────────────
+# The training data is not in the repo: `data/` is gitignored, and W&I+LOCNESS
+# is licensed for non-commercial research and is not ours to redistribute. The
+# import is pure code and takes seconds, so the VM fetches the corpus from
+# Cambridge and rebuilds the parquet rather than receiving it from here.
+#
+# Only for stage A. Stage B trains on teacher-graded rows, which have to be
+# uploaded or pulled from a DVC remote because no public source exists.
+case "${EXTRA_OVERRIDES}" in
+  *train.task=corrector*)
+    echo ""
+    echo "--- [3b/5] Building the stage-A corpus on the VM ---"
+    colab exec -s "${SESSION}" --timeout "${EXEC_TIMEOUT}" <<'PYDATA'
+import os, subprocess, sys, urllib.request, tarfile
+
+repo = "/content/lexi-research"
+corpus = f"{repo}/data/corpora/wi_locness"
+if os.path.isdir(f"{corpus}/m2"):
+    print(">>> corpus already present", flush=True)
+else:
+    url = "https://www.cl.cam.ac.uk/research/nl/bea2019st/data/wi+locness_v2.1.bea19.tar.gz"
+    archive = "/content/wi_locness.tar.gz"
+    print(f">>> downloading {url}", flush=True)
+    urllib.request.urlretrieve(url, archive)
+    os.makedirs(f"{repo}/data/corpora", exist_ok=True)
+    with tarfile.open(archive) as tar:
+        tar.extractall(f"{repo}/data/corpora")
+    os.rename(f"{repo}/data/corpora/wi+locness", corpus)
+    print(">>> extracted", flush=True)
+
+cmd = [sys.executable, "-m", "lexi_research.cli", "data", "gec-import",
+       "--corpus", "data/corpora/wi_locness", "--out", "data/gec"]
+print(f">>> {' '.join(cmd)}", flush=True)
+result = subprocess.run(cmd, cwd=repo)
+if result.returncode:
+    print("❌ Stage-A import failed!", flush=True)
+    sys.exit(result.returncode)
+print("\n✅ Stage-A data ready", flush=True)
+PYDATA
+    ;;
+esac
 
 # ── 4. Train ─────────────────────────────────────────────
 echo ""
