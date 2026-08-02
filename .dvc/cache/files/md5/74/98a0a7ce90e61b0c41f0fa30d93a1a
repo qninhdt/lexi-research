@@ -1,7 +1,0 @@
-{
-  "pool_rows": 183823,
-  "quarantine_rows": 18784,
-  "source_db_sha256": "147a99e1d723671a6488100d7742783c45fb1e254a515d834709442cb963b3a4",
-  "source_file": "data",
-  "target_groups": 99212
-}

@@ -24,6 +24,14 @@ data/*
 *.sqlite
 *.db
 
+# The DVC cache holds the content of every tracked artifact, so committing it
+# commits the data itself. W&I+LOCNESS is licensed for non-commercial research
+# and permits publishing excerpts of under 100 words only, so its converted rows
+# must not enter a Git remote. `.dvc/config` sets `no_scm`, which means DVC does
+# not write its own ignore file and this has to be stated here.
+.dvc/cache/
+.dvc/tmp/
+
 # Training / eval outputs
 outputs/
 checkpoints/
