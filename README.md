@@ -158,6 +158,25 @@ TRAIN_PATH=data/clean/train.parquet MAX_STEPS=0 \
 - A failed or interrupted run now **leaves its VM running** so its checkpoints
   survive; the script prints how to resume, inspect, or stop it. The VM consumes
   compute units until stopped. `KEEP_VM=1` keeps it up after a successful run too.
+- A session's proxy token expires after an hour. When it does the CLI forgets
+  the VM while the VM keeps running and billing, and `colab stop` can no longer
+  see it. `bash ops/release-colab-orphans.sh` lists such VMs; `--yes` releases
+  them.
+
+## Serving on Colab
+
+`run_colab_serve.sh` rents an L4, installs vLLM, serves Qwen3.5-4B, and prints a
+public OpenAI-compatible base URL plus a bearer token:
+
+```bash
+bash run_colab_serve.sh
+STOP=1 bash run_colab_serve.sh   # release the VM
+```
+
+Measured on an L4: 19.0 GiB of 22.0 GiB resident, 9.3 GiB of KV cache (273k
+tokens), 27.8 tok/s at concurrency 1 and 389.8 tok/s at 32. See
+[`docs/colab-vllm-serving.md`](docs/colab-vllm-serving.md) for the CUDA,
+`setsid`, and tunnelling details that make it work headlessly.
 
 The base model is a value in `params.yaml`. Nothing in the source names a model:
 the loader reads the checkpoint's own `config.architectures`, prompts render
