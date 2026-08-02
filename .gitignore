@@ -28,4 +28,15 @@ data/*
 outputs/
 checkpoints/
 wandb/
-reports/
+# Generated eval reports at the repo root. Anchored with a leading slash: the
+# bare pattern also matched `plans/reports/`, which is written research rather
+# than generated output, and excluding it silently lost documented findings.
+/reports/
+# Adapter weights and run artifacts. Hundreds of MB of binaries that belong in
+# DVC or W&B artifacts, not in Git history.
+runs/
+
+# Local tool state
+.codegraph/
+.claude/
+.gemini/
