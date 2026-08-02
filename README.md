@@ -80,6 +80,85 @@ make -f ops/Makefile smoke        # CPU, seconds
 make -f ops/Makefile smoke-gpu    # the checkpoint in train.base_model
 ```
 
+For the L4 run, install the pinned GPU matrix in `requirements-colab-l4.txt`.
+It enables the native PyTorch SDPA path plus Qwen3.5's
+`flash-linear-attention` and `causal-conv1d` kernels; the external
+`flash-attn` package is not required. The requirements select the matching
+`causal-conv1d` wheel for Python 3.10–3.13.
+
+The Colab CLI launcher defaults to an L4 and accepts either checkpoint:
+
+```bash
+bash run_colab_train.sh L4 qwen
+bash run_colab_train.sh L4 gemma
+```
+
+Those commands run a two-step smoke train. For the real dataset, set
+`TRAIN_PATH`, `OUTPUT_DIR`, and `MAX_STEPS=0`. The L4 profile uses text-only
+loading (media towers are removed after load), selective logits, fused AdamW,
+TF32, prefetching, and non-reentrant gradient checkpointing; this recomputation
+is required for the 22 GiB L4 with these roughly 1.5k-token examples.
+
+The per-device batch size is set per model, because on a 22 GiB L4 it is a
+memory fact rather than a preference. Both pairs multiply to the same effective
+batch of 32, so the learning rate carries over between them:
+
+| Model | Batch x accum | Measured (2 steps) | Peak |
+| --- | --- | ---: | ---: |
+| `Qwen/Qwen3.5-4B` | 4 x 8 | 171 s | 9.5 GiB |
+| `google/gemma-4-E4B-it` | 1 x 32 | 220 s | 20.6 GiB |
+
+Gemma 4 E4B-it runs out of memory at batch 4, so `params.yaml` keeps the safe
+default and the launcher raises it only for Qwen. `BATCH_SIZE` and `GRAD_ACCUM`
+override the pair — change both, or the effective batch moves with it. Gemma
+leaves under 1.5 GiB free, which is less than a warm Colab kernel may still be
+holding from earlier work; verify a Gemma memory change on a fresh session.
+
+In-loop evaluation decodes rows in batches of `eval.batch_size` (default 8),
+measured at 39 s against 208 s for one-row-at-a-time over 16 rows. Batching
+changes bf16 reduction order, so `raw` completion text can differ
+token-for-token from a serial run even at temperature 0 while the parsed answer
+stays the same; set `eval.batch_size: 1` when byte-stable completions matter.
+
+A fresh Colab VM has no model cache, so each session downloads the checkpoint
+once — about 40 s for a 4B model with `hf_transfer`, which the launcher enables.
+To keep it between sessions, mount Drive and point `HF_HOME` at it:
+
+```bash
+colab drivemount -s lexi-train-qwen
+HF_HOME=/content/drive/MyDrive/hf-cache bash run_colab_train.sh L4 qwen
+```
+
+Loading an already-cached 4B checkpoint takes about 13 s and is not worth
+optimising further: `device_map="auto"` and `"cuda:0"` measured identically on
+one L4.
+
+### A full run does not fit in one Colab session
+
+At the configured scale — 16,320 training rows over 2 epochs, ~2.3 s per
+sequence on an L4 — a complete SFT run is roughly **21 hours**, and Colab ends
+sessions well before that. The run is therefore built to be resumed rather than
+to finish in one sitting:
+
+```bash
+colab drivemount -s lexi-train-qwen
+TRAIN_PATH=data/clean/train.parquet MAX_STEPS=0 \
+  REMOTE_OUTPUT_DIR=/content/drive/MyDrive/lexi-runs/qwen35 \
+  HF_HOME=/content/drive/MyDrive/hf-cache \
+  bash run_colab_train.sh L4 qwen
+```
+
+- `REMOTE_OUTPUT_DIR` on a Drive mount means each `train.save_steps` checkpoint
+  is written to storage that outlives the VM. Without it, checkpoints sit on
+  VM-local disk and are downloaded only after training finishes — so a session
+  killed partway through loses all of them.
+- `RESUME` defaults to `auto`, which continues from the newest checkpoint in the
+  output directory. Re-run the same command after a session dies. `RESUME=none`
+  starts over.
+- A failed or interrupted run now **leaves its VM running** so its checkpoints
+  survive; the script prints how to resume, inspect, or stop it. The VM consumes
+  compute units until stopped. `KEEP_VM=1` keeps it up after a successful run too.
+
 The base model is a value in `params.yaml`. Nothing in the source names a model:
 the loader reads the checkpoint's own `config.architectures`, prompts render
 through its tokenizer's chat template, and LoRA targets are resolved by role from
