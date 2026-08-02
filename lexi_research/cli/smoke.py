@@ -304,7 +304,14 @@ def run_smoke(config: Config, *, gpu: bool = False) -> int:
         print(f"data — {summary}", flush=True)
 
         if gpu:
-            run_config = config.with_overrides(["train.epochs=1"])
+            run_config = config.with_overrides(
+                [
+                    "train.epochs=1",
+                    f"train.max_steps={config.get_int('smoke.steps')}",
+                    "train.per_device_batch_size=1",
+                    "train.grad_accum=1",
+                ]
+            )
             model = tokenizer = None
         else:
             run_config = config.with_overrides(
@@ -358,6 +365,7 @@ def check_rl_tracks(config: Config, model: Any, tokenizer: Any, workdir: Path) -
         run_config = config.with_overrides(
             [
                 f"rl.algo={algorithm}",
+                "train.thinking=on",
                 "rl.group_size=2",
                 "rl.max_reasoning_tokens=8",
                 "eval.max_new_tokens=8",
