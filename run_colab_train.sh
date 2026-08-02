@@ -22,6 +22,21 @@ OUTPUT_DIR="${OUTPUT_DIR:-models/smoke_test-${MODEL_KEY}}"
 MAX_STEPS="${MAX_STEPS:-2}"
 EPOCHS="${EPOCHS:-1}"
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-7200}"
+# A session's proxy token expires after about an hour. When it does, the CLI
+# loses the VM — `colab exec` returns "appears to be lost (404/401)" — while the
+# VM keeps running and keeps billing, and `colab stop` can no longer see it.
+#
+# So a step whose timeout exceeds the token's lifetime cannot report a result:
+# it either finishes first or the session is gone before it does. Warn rather
+# than clamp, because a Drive-backed `REMOTE_OUTPUT_DIR` plus `RESUME=auto` is a
+# legitimate way to run past the limit — the checkpoints survive and a relaunch
+# continues. Without one, the run is spending compute it cannot collect.
+if [ "${EXEC_TIMEOUT}" -gt 3300 ] && [ -z "${REMOTE_OUTPUT_DIR:-}" ]; then
+  echo "warning: EXEC_TIMEOUT=${EXEC_TIMEOUT}s exceeds the ~1h proxy-token lifetime," >&2
+  echo "         and REMOTE_OUTPUT_DIR is unset, so checkpoints live on VM-local" >&2
+  echo "         disk. If the token expires first, this run's output is lost and" >&2
+  echo "         the VM keeps billing — release it with ops/release-colab-orphans.sh." >&2
+fi
 # Where the remote VM keeps its Hugging Face cache. Empty means the VM-local
 # default, so each session re-downloads the checkpoint (~40 s for a 4B model).
 # Point it at a mounted Drive path — e.g.
@@ -106,6 +121,14 @@ case "${EXTRA_OVERRIDES}" in
     echo "EXTRA_OVERRIDES may contain only letters, digits, '_', '.', '=', '-', and spaces." >&2
     exit 2
     ;;
+esac
+
+# Which rubric the generation check should render. Read back out of the
+# overrides rather than passed separately, so it cannot disagree with what the
+# run trained on.
+case " ${EXTRA_OVERRIDES} " in
+  *" train.rubric=terse "*) RUBRIC_MODE="terse" ;;
+  *) RUBRIC_MODE="full" ;;
 esac
 
 # Which branch the VM checks out. It clones from GitHub rather than uploading the
@@ -367,6 +390,60 @@ if result.returncode:
     sys.exit(result.returncode)
 print("\n✅ Training complete!", flush=True)
 PYTRAIN
+
+# ── 4b. Generation check ─────────────────────────────────
+# A finished run and a working model are different claims. Loss falls smoothly
+# while a model emits unparseable markup, so `SMOKE_CHECK=1` loads the adapter
+# back and decodes one row: it answers whether the adapter attaches, whether the
+# prompt renders at inference, and whether the output parses — which is what a
+# pipeline check is actually asking.
+if [ "${SMOKE_CHECK:-0}" = "1" ]; then
+  echo ""
+  echo "--- [4b/5] Checking the adapter generates parseable markup ---"
+  cat <<PYCHECK | colab exec -s "${SESSION}" --timeout 900
+import os, sys
+os.chdir("/content/lexi-research")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from lexi_research.format.parser import ParseError, parse_correction
+from lexi_research.train.corrector_prompt import render_corrector_prompt
+
+adapter = "${REMOTE_OUTPUT_DIR}" or "${OUTPUT_DIR}"
+tokenizer = AutoTokenizer.from_pretrained("${MODEL_ID}")
+model = AutoModelForCausalLM.from_pretrained(
+    "${MODEL_ID}", dtype=torch.bfloat16, device_map="cuda:0"
+)
+model = PeftModel.from_pretrained(model, adapter)
+model.eval()
+
+text = "He speak very well in the meeting yesterday."
+messages = render_corrector_prompt(text, rubric="${RUBRIC_MODE}")
+prompt = tokenizer.apply_chat_template(
+    messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+)
+inputs = tokenizer(prompt, return_tensors="pt").to("cuda:0")
+with torch.no_grad():
+    out = model.generate(**inputs, max_new_tokens=96, do_sample=False)
+completion = tokenizer.decode(
+    out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+).strip()
+
+print(f"input : {text}")
+print(f"output: {completion}")
+parsed = parse_correction(completion)
+if isinstance(parsed, ParseError):
+    # Not a failure of the run. Five optimiser steps cannot teach a format, and
+    # this check exists to prove the path executes, not that the model learned.
+    print(f"note  : does not parse yet ({parsed.code}) — expected at this step count")
+else:
+    print(f"parses: {len(parsed.edits)} edit(s); strip == input: {parsed.text == text}")
+print("\n✅ Generation path works", flush=True)
+PYCHECK
+fi
 
 # ── 5. Download & cleanup ────────────────────────────────
 echo ""
