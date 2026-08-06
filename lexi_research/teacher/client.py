@@ -233,6 +233,28 @@ class TeacherClient:
         window = self.config.base_delay * (2**attempt)
         await asyncio.sleep(_JITTER.uniform(0, window))
 
+    def _key(self, messages: MessageSource, cache_extra: Any) -> str:
+        """Content address for one request.
+
+        `sampling` participates because the cache stores answers, and a decoding
+        setting that changes the answer must change the address. `reasoning_effort`
+        is the case that matters: measured on this endpoint, `max` spends roughly
+        1.9x the completion tokens of `low` and returns different gradings, so a
+        run that raised it while reading an entry written at the old setting would
+        report reasoning it never paid for. `temperature` rides along for the same
+        reason.
+        """
+        request = cache_extra if cache_extra is not None else render_messages(messages)
+        sampling = {
+            "reasoning_effort": self.config.reasoning_effort,
+            "temperature": self.config.temperature,
+        }
+        # Absent settings are omitted rather than sent as empty, so entries
+        # written before this existed still hit at the default configuration.
+        active = {name: value for name, value in sampling.items() if value}
+        payload: Any = {"request": request, "sampling": active} if active else request
+        return cache_key(self.config.model, self.prompt_hash, payload)
+
     def _record_usage(self) -> None:
         """Fold the provider's token counts for the last call into the run stats."""
         prompt_tokens, completion_tokens = getattr(self._llm, "last_usage", (0, 0))
@@ -261,11 +283,7 @@ class TeacherClient:
         deterministic backend the same question again; a caller whose prompt
         carries a nonce should pass the renderer so each attempt differs.
         """
-        key = cache_key(
-            self.config.model,
-            self.prompt_hash,
-            cache_extra if cache_extra is not None else render_messages(messages),
-        )
+        key = self._key(messages, cache_extra)
         self.stats.calls += 1
 
         cached = self.cache.get(key)
@@ -302,12 +320,7 @@ class TeacherClient:
 
     def invalidate(self, messages: MessageSource, *, cache_extra: Any = None) -> None:
         """Forget a structurally decoded response rejected by caller validation."""
-        key = cache_key(
-            self.config.model,
-            self.prompt_hash,
-            cache_extra if cache_extra is not None else render_messages(messages),
-        )
-        self.cache.delete(key)
+        self.cache.delete(self._key(messages, cache_extra))
 
     async def map(
         self,

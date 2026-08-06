@@ -255,6 +255,80 @@ def test_unknown_cost_reports_zero_rather_than_guessing() -> None:
     assert config.cost_of(10_000, 10_000) == 0.0
 
 
+class TestSamplingInTheCacheKey:
+    """A decoding setting that changes the answer must change the address.
+
+    Measured on the configured endpoint, `reasoning_effort: max` spends about
+    1.9x the completion tokens of `low` and returns different gradings. A run
+    that raised the setting and then read an entry written at the old one would
+    report reasoning it never paid for.
+    """
+
+    async def test_raising_reasoning_effort_misses_the_cache(
+        self, client_factory, tmp_path
+    ) -> None:
+        from lexi_research.teacher import ResponseCache
+
+        cache = ResponseCache(tmp_path / "cache")
+        first = client_factory(FakeLLM(PAYLOAD), cache=cache, reasoning_effort="low")
+        await first.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        hotter_llm = FakeLLM(PAYLOAD)
+        hotter = client_factory(hotter_llm, cache=cache, reasoning_effort="max")
+        await hotter.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        assert hotter_llm.calls == 1, "a different effort must reach the provider"
+        assert hotter.stats.cache_hits == 0
+
+    async def test_the_same_effort_still_hits(self, client_factory, tmp_path) -> None:
+        from lexi_research.teacher import ResponseCache
+
+        cache = ResponseCache(tmp_path / "cache")
+        first = client_factory(FakeLLM(PAYLOAD), cache=cache, reasoning_effort="max")
+        await first.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        second_llm = FakeLLM(PAYLOAD)
+        second = client_factory(second_llm, cache=cache, reasoning_effort="max")
+        await second.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        assert second_llm.calls == 0
+        assert second.stats.cache_hits == 1
+
+    async def test_temperature_also_participates(self, client_factory, tmp_path) -> None:
+        from lexi_research.teacher import ResponseCache
+
+        cache = ResponseCache(tmp_path / "cache")
+        cold = client_factory(FakeLLM(PAYLOAD), cache=cache, temperature=0.0)
+        await cold.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        hot_llm = FakeLLM(PAYLOAD)
+        hot = client_factory(hot_llm, cache=cache, temperature=0.7)
+        await hot.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        assert hot_llm.calls == 1
+
+    async def test_entries_written_before_this_existed_still_hit(
+        self, client_factory, tmp_path
+    ) -> None:
+        """At the default configuration the key is the bare request, as before.
+
+        Otherwise adding this would have silently orphaned every paid entry in
+        the cache on disk.
+        """
+        from lexi_research.teacher import ResponseCache, cache_key
+
+        cache = ResponseCache(tmp_path / "cache")
+        legacy = cache_key("test-model", "test-prompt-hash", {"row": 1})
+        cache.put(legacy, PAYLOAD)
+
+        llm = FakeLLM(PAYLOAD)
+        client = client_factory(llm, cache=cache)
+        result = await client.call(MESSAGES, GraderOutput, cache_extra={"row": 1})
+
+        assert llm.calls == 0
+        assert result.meaning == 4
+
+
 def test_client_teacher_client_is_exported() -> None:
     assert TeacherClient.__module__.endswith("teacher.client")
 
