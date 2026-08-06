@@ -43,12 +43,18 @@ UPLOAD: tuple[tuple[str, str], ...] = (
     ("data/batches/sample-report.json", "reports/sample-report.json"),
     ("reports/pilot-gate.json", "reports/pilot-gate.json"),
     ("reports/pilot-ceiling.json", "reports/pilot-ceiling.json"),
+    ("reports/tag-distribution-reference.json", "reports/tag-distribution-reference.json"),
     ("band_config.json", "band_config.json"),
 )
 
 #: Paths that must never be uploaded, checked against the resolved upload list.
 #: A licence breach is not something to leave to reviewer attention.
 FORBIDDEN = ("data/gec/", "data/corpora/", ".cache/", ".env")
+
+#: Per-tag shares measured against a human-annotated corpus, written by
+#: `ops/tag-distribution-reference.py`. Only aggregate rates, so it carries no
+#: corpus text and is safe to publish.
+_TAG_REFERENCE = "reports/tag-distribution-reference.json"
 
 
 class PublishError(RuntimeError):
@@ -108,6 +114,46 @@ def _split_section(quality: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _skew_limitation(reference: dict[str, Any] | None) -> list[str]:
+    """State the tag skew, with the shares read from the reference rather than typed.
+
+    Typing the percentages into prose would make them a claim that silently goes
+    stale the next time rows are added. Read from the file that measured them, the
+    sentence either matches the shipped JSON or is absent.
+    """
+    if not reference:
+        return []
+    tags = reference.get("tags") or {}
+    over, under = [], []
+    for tag, shares in sorted(tags.items()):
+        mine = shares.get("teacher_share")
+        human = shares.get("human_share")
+        if not mine or not human:
+            # A tag absent from one side has no ratio to report; the human corpus
+            # has no `coll` or `other` at all, which the card covers elsewhere.
+            continue
+        entry = f"`{tag}` ({mine:.1%} vs {human:.1%})"
+        if mine / human >= 2:
+            over.append(entry)
+        elif mine / human <= 0.5:
+            under.append(entry)
+    if not over and not under:
+        return []
+    rows = reference.get("human_rows", "?")
+    corpus = reference.get("human_corpus", "a human-annotated corpus")
+    return [
+        "- **The error mix is skewed relative to human-annotated learner text.** "
+        f"Against {corpus} ({rows:,} rows, the same 16 tags), this data "
+        f"over-produces {', '.join(over) or 'nothing'} and under-produces "
+        f"{', '.join(under) or 'nothing'}. The cause is the learner profiles: their "
+        "`error_bias` fields drive what call 1 writes, and `punc`, `sp`, `pron`, "
+        "`poss` and `other` appear in no profile at all. Punctuation and spelling "
+        "are among the commonest real learner errors, so a model trained on this "
+        "alone will be weakest there. Full comparison in "
+        "`reports/tag-distribution-reference.json`.",
+    ]
+
+
 def build_card(
     *,
     repo_id: str,
@@ -122,6 +168,7 @@ def build_card(
     teacher_endpoint: str,
     quality: dict[str, Any] | None = None,
     calibrated: bool = False,
+    tag_reference: dict[str, Any] | None = None,
 ) -> str:
     """Render the dataset card from measurements, never from assumption."""
     labels = pq.read_table(labels_path).to_pylist()
@@ -292,6 +339,7 @@ def build_card(
         "- **Bands are uncalibrated** until `lexi data calibrate` has run;",
         "  `band_config.json` carries `\"calibrated\": false` when that is still true.",
         "- **`feedback` is unmeasured.** No metric in this snapshot evaluates it.",
+        *_skew_limitation(tag_reference),
         *(
             []
             if calibrated
@@ -386,6 +434,11 @@ def main(argv: list[str] | None = None) -> int:
         teacher_endpoint=os.environ.get("LEXI_TEACHER_BASE_URL", "unknown"),
         quality=quality,
         calibrated=bool(band.get("calibrated")),
+        tag_reference=(
+            json.loads(Path(_TAG_REFERENCE).read_text(encoding="utf-8"))
+            if Path(_TAG_REFERENCE).exists()
+            else None
+        ),
     )
 
     if args.card_out:
