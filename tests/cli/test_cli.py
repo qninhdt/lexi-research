@@ -102,6 +102,11 @@ def test_print_config_runs_no_stage(capsys) -> None:
     assert payload["smoke"]["fixture"] == FIXTURE
 
 
+def test_pilot_gate_is_registered(capsys) -> None:
+    payload = _print_config(["data", "pilot-gate"], capsys)
+    assert payload["label"]["self_consistency_sample"] == 200
+
+
 def test_the_committed_fixture_still_meets_its_contract() -> None:
     """Every band, both tag groups, a null correction, a multiword, a clean row."""
     summary = check_fixture(load_rows(FIXTURE))

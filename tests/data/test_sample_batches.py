@@ -14,9 +14,9 @@ import pytest
 from lexi_research.data.profiles import ProfileRegistry, load_profiles
 from lexi_research.data.sample_batches import (
     ERROR_SPECS,
-    K,
     MEANING_REQS,
     SPEC_COLUMNS,
+    K,
     Sense,
     build_batches,
     load_weights,
@@ -108,6 +108,48 @@ class TestSampleSenses:
         thin = [_sense(i) for i in range(10)] + [_sense(99, multiword=True)]
         picked = sample_senses(thin, 8, seed=1, multiword_share=0.5)
         assert len(picked) == 8
+
+    def test_a_smaller_draw_is_a_prefix_of_a_larger_one(self, pool: list[Sense]) -> None:
+        """The property that makes growing a dataset affordable.
+
+        Generation is paid per sense. If raising the count re-drew a fresh
+        combination, the senses already generated would mostly fall out of the
+        sample and their cost would be thrown away. Nesting means a larger run
+        re-requests the same senses — whose `batch_uid`s are unchanged — so the
+        response cache serves them and only new senses reach the network.
+        """
+        small = {s.sense_uid for s in sample_senses(pool, 20, seed=1)}
+        medium = {s.sense_uid for s in sample_senses(pool, 40, seed=1)}
+        large = {s.sense_uid for s in sample_senses(pool, 60, seed=1)}
+
+        assert small <= medium <= large
+
+    def test_growing_the_count_keeps_every_batch_uid(
+        self, pool: list[Sense], registry: ProfileRegistry
+    ) -> None:
+        """Nesting is only worth anything if the cache key survives it too."""
+        before, _ = build_batches(sample_senses(pool, 20, seed=1), registry, seed=1)
+        after, _ = build_batches(sample_senses(pool, 50, seed=1), registry, seed=1)
+
+        uids_after = {batch.sense.sense_uid: batch.batch_uid for batch in after}
+        assert all(batch.sense.sense_uid in uids_after for batch in before)
+        assert all(uids_after[batch.sense.sense_uid] == batch.batch_uid for batch in before)
+
+    def test_a_grown_pool_does_not_reshuffle_the_existing_draw(
+        self, pool: list[Sense]
+    ) -> None:
+        """Ranking is per-sense, so new senses interleave without displacing paid work.
+
+        They may push a sense past the cut when the count is fixed, but they must
+        never reorder the senses that remain — that would change which ones a
+        resumed run considers already done.
+        """
+        before = [s.sense_uid for s in sample_senses(pool, 30, seed=1)]
+        grown = list(pool) + [_sense(10_000 + i) for i in range(25)]
+        after = [s.sense_uid for s in sample_senses(grown, 30, seed=1)]
+
+        survivors = [uid for uid in after if uid in set(before)]
+        assert survivors == [uid for uid in before if uid in set(after)]
 
 
 class TestBuildBatches:

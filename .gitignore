@@ -11,6 +11,12 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
+# The teacher response cache. Content-addressed provider payloads, including the
+# ones the validator rejected, so it is both large and the least reviewed text in
+# the tree. It is a resume aid, never an artifact: its hit rate is reported and
+# the parquet is what gets published.
+.cache/
+
 # Secrets / local config
 .env
 .env.*

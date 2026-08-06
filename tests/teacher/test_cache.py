@@ -86,6 +86,15 @@ def test_stats_report_hit_rate(tmp_path: Path) -> None:
     }
 
 
+def test_delete_invalidates_an_entry_across_processes(tmp_path: Path) -> None:
+    cache = ResponseCache(tmp_path)
+    cache.put("ab1", {"v": 1})
+    cache.delete("ab1")
+
+    assert cache.get("ab1") is None
+    assert ResponseCache(tmp_path).get("ab1") is None
+
+
 def test_null_cache_never_hits_and_writes_nothing(tmp_path: Path) -> None:
     """The parity checks need the teacher to actually answer again."""
     cache = NullCache()

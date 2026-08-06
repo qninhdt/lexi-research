@@ -53,17 +53,37 @@ def test_every_row_over_the_limit_raises() -> None:
         _build([ROW] * 3, max_seq_len=4)
 
 
+def _limit_admitting_only_short(short: dict, long: dict) -> int:
+    """A `max_seq_len` that fits `short` and not `long`, whatever the prompt costs.
+
+    Derived rather than hardcoded: a literal here silently becomes wrong when the
+    grader rubric changes length, and it then fails as "every row is too long"
+    instead of testing the drop ceiling it was written for.
+    """
+    fits, _ = _build([short])
+    too_long, _ = _build([long])
+    short_len = len(fits[0].input_ids)
+    long_len = len(too_long[0].input_ids)
+    assert short_len < long_len, "the fixture rows must differ in length"
+    return (short_len + long_len) // 2
+
+
 def test_dropping_more_than_the_ceiling_raises() -> None:
     """A run on the surviving fraction answers a different question."""
     short = dict(ROW, feedback="Fine.")
-    rows = [short] + [dict(ROW, text=ROW["text"] + " word" * 400)] * 4
+    long = dict(ROW, text=ROW["text"] + " word" * 400)
+    limit = _limit_admitting_only_short(short, long)
+
     with pytest.raises(TrainerSetupError, match="over the"):
-        _build(rows, max_seq_len=1300)
+        _build([short] + [long] * 4, max_seq_len=limit)
 
 
 def test_dropping_under_the_ceiling_is_reported_not_fatal() -> None:
-    rows = [ROW] * 99 + [dict(ROW, text=ROW["text"] + " word" * 400)]
-    examples, dropped = _build(rows, max_seq_len=1300, max_drop_fraction=0.05)
+    long = dict(ROW, text=ROW["text"] + " word" * 400)
+    limit = _limit_admitting_only_short(ROW, long)
+
+    examples, dropped = _build([ROW] * 99 + [long], max_seq_len=limit, max_drop_fraction=0.05)
+
     assert dropped == 1
     assert len(examples) == 99
 

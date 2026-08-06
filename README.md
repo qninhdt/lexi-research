@@ -93,6 +93,20 @@ format check before generating data:
 uv run python -m lexi_research.teacher.probe
 ```
 
+The default data sample is the 84-sense pilot (about 500 generated sentences).
+Run its automatic gates before using `data sample --full`:
+
+```bash
+uv run lexi data sample --pool data/pool/senses_pool.parquet --out data/batches
+uv run lexi data generate --specs data/batches/batch_specs.parquet --out data/raw
+uv run lexi data label --texts data/raw/raw_texts.parquet --out data/raw
+uv run lexi data pilot-gate --out reports
+```
+
+`pilot-gate` re-grades a shuffled sample with the cache disabled and writes
+`reports/pilot-gate.json` plus `reports/pilot-ceiling.json`. G7 remains a manual
+read of roughly 50 rows and is deliberately not fabricated by the command.
+
 The source export is reproducible without teacher credentials:
 
 ```bash
@@ -243,6 +257,30 @@ Bands are **uncalibrated** until `lexi data calibrate` has run: `band_config.jso
 ships with `"calibrated": false`, and the eval harness refuses to report band
 metrics until that flips.
 
+## Publishing the dataset
+
+The teacher-generated stage-B data is publishable; stage A is not. `data/gec/`
+is converted from W&I+LOCNESS, whose LOCNESS licence forbids distributing any
+part of the corpus to a third party, so the upload list is an explicit allowlist
+of files rather than a directory glob, and a test asserts stage A is absent.
+
+```bash
+uv run lexi data publish --repo-id your-name/lexi-grader-sft --dry-run
+uv run lexi data publish --repo-id your-name/lexi-grader-sft
+```
+
+The dataset card is generated from the run's own report JSON — counts, band
+distribution, gate results and the teacher configuration — so it cannot claim a
+number the pipeline did not measure. A failed blocking gate is stated in the card
+rather than omitted.
+
 ## License
 
-MIT
+MIT for the code in this repository.
+
+The sense pool is assembled and modified from several public datasets on a schema
+modelled after the Cambridge dictionary site; "Cambridge" here names the schema,
+not a redistributed product. The W&I+LOCNESS corpus used for stage A is licensed
+for non-commercial research and education and is **not** redistributed: the
+importer reads a local copy, and `data/` is gitignored. Cite Yannakoudakis et al.
+2018 in anything published from it.

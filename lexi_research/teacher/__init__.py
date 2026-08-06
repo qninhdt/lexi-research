@@ -9,7 +9,15 @@ learn a function it is never asked to compute.
 """
 
 from .cache import NullCache, ResponseCache, cache_key
-from .client import OpenAIStructuredLLM, RetryExhausted, StructuredLLM, TeacherClient
+from .client import (
+    EmptyToolArguments,
+    MessageSource,
+    OpenAIStructuredLLM,
+    RetryExhausted,
+    StructuredLLM,
+    TeacherClient,
+    render_messages,
+)
 from .registry import (
     GRADER_TEMPLATES,
     PROMPTS_DIR,
@@ -37,7 +45,9 @@ __all__ = [
     "DiversifiedSentence",
     "DiversifyBatch",
     "DiversifySpec",
+    "EmptyToolArguments",
     "GraderOutput",
+    "MessageSource",
     "NullCache",
     "OpenAIStructuredLLM",
     "ResponseCache",
@@ -49,6 +59,7 @@ __all__ = [
     "cache_key",
     "prompt_hash",
     "render_diversify_prompt",
+    "render_messages",
     "render_grader_prompt",
     "template_names",
 ]

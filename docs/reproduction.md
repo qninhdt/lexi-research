@@ -12,5 +12,16 @@
 Every result must record: git SHA, source DB SHA-256, DVC hash, split version,
 params hash, seed, teacher model, prompt hash, and base-model revision.
 
-Cambridge-derived parquet data is private. Reproduction requires legitimate local
-access to the source database and configured private DVC/R2 storage.
+The sense pool is assembled and modified from several public datasets, on a schema
+modelled after the Cambridge dictionary site; "Cambridge" in this repo names that
+schema, not a redistributed Cambridge product. Reproduction still requires local
+access to the source database, because the pool itself is not shipped here.
+
+Two artifacts have different distribution rules, and the difference is a licence
+rather than a preference:
+
+- **Stage B** (`data/raw/`, teacher-generated) is publishable. `lexi data publish`
+  pushes it to the Hugging Face Hub with a card generated from the run reports.
+- **Stage A** (`data/gec/`, converted from W&I+LOCNESS) is **not**. The LOCNESS
+  licence forbids distributing any part of the corpus to a third party, so it
+  stays on the machine that built it and is absent from the upload allowlist.

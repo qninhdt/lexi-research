@@ -253,6 +253,8 @@ Fail → drop row (dataset build) / retry (inference).
 
 Cambridge-derived text stays **private** (redistribution rights unverified) — DVC remote only, never Git, never HF Hub.
 
+> **Superseded.** The pool is not a copy of a Cambridge product: the schema was modelled on the Cambridge site, and the sense rows were assembled and modified from several public datasets. Stage-B artifacts are therefore publishable, and `lexi data publish` pushes them to the Hub. The constraint that remains is **stage A**: `data/gec/` derives from W&I+LOCNESS, whose LOCNESS licence forbids distributing any part of the corpus to a third party, so it is excluded from the upload allowlist and enforced by a test.
+
 ---
 
 ## 11. Split · Eval · Train

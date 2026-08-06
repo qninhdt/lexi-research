@@ -96,17 +96,22 @@ train:
   # chat format from its own tokenizer template, so switching base model is a
   # value change here rather than a code change.
   base_model: Qwen/Qwen3.5-4B
-  # The rubric in the grader system prompt is long: a rendered example measures
-  # ~1250 whitespace tokens before subword splitting, so the previous 1024 would
-  # have dropped every row. Real examples tokenise to about 1.5k, so 2048 covers
-  # a longer learner sentence and a reasoning block with room to spare.
+  # The rubric in the grader system prompt is long, and it grew when the grader
+  # was taught the reconstruction and band-separation rules that took format
+  # validity from 0.86 to 0.96. Measured over the 467-row pilot with the real
+  # Qwen tokenizer: prompt + answer is median 2020, p95 2085, max 2141 tokens.
+  # 2048 dropped 86 of those rows; 2560 drops none and leaves room for a longer
+  # learner sentence.
   #
-  # Batches are padded to their own longest row, not to this limit, so lowering
-  # it does not speed up a typical batch. What it does is bound the worst case:
-  # one 4k-token outlier would otherwise stretch every sequence batched with it
-  # to 4k. `max_drop_fraction` below is the guard — if a corpus ever needs more
-  # than this, the run stops rather than quietly training on the short rows.
-  max_seq_len: 2048
+  # Batches are padded to their own longest row, not to this limit, so raising it
+  # does not slow a typical batch. What it does is bound the worst case: one
+  # 4k-token outlier would otherwise stretch every sequence batched with it to 4k.
+  # `max_drop_fraction` below is the guard — if a corpus ever needs more than
+  # this, the run stops rather than quietly training on the short rows.
+  #
+  # The sequences themselves did get ~1.34x longer than the old prompt's 1503
+  # median, which is real training cost paid for the validity gain.
+  max_seq_len: 2560
   # Rows over the limit are dropped, and dropping is length-biased. Past this
   # share the remaining data is a different distribution, so the run stops.
   max_drop_fraction: 0.02

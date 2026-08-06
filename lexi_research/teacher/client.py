@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
@@ -31,6 +32,47 @@ from .cache import ResponseCache, cache_key
 from .schemas import CallStats, ChatMsg, TeacherConfig
 
 _T = TypeVar("_T", bound=BaseModel)
+
+#: A request's messages, or a factory that builds them fresh for each attempt.
+#:
+#: The factory form exists because a retry has to change something to be worth
+#: paying for. Measured against this proxy on 100 rows: about 7% of gradings come
+#: back with empty tool arguments, and re-asking with byte-identical messages
+#: recovered 7 of 8 such rows while re-rendering the prompt recovered 8 of 8.
+#: Raising the temperature instead recovered only 5 of 8, so the fix is fresh
+#: bytes at temperature 0 rather than a hotter sample.
+MessageSource = list[ChatMsg] | Callable[[], list[ChatMsg]]
+
+
+def render_messages(source: MessageSource) -> list[ChatMsg]:
+    """The message list for one attempt, calling the factory if there is one."""
+    return source() if callable(source) else source
+
+
+def _unwrap_arguments(payload: dict[str, Any], schema: type[BaseModel]) -> dict[str, Any]:
+    """Recover a schema payload the endpoint wrapped or renamed.
+
+    Measured against one proxy: alongside the fields it was asked for, it
+    sometimes returns them prefixed (`__correction`) or nested one level under a
+    placeholder key it invented (`$PARAMETER_NAME`, `corrections`). The answer is
+    present and correct in both shapes, so unwrapping it is free where a retry
+    costs a call. Anything that does not match a known shape is passed through
+    untouched, so a genuinely wrong payload still fails validation.
+    """
+    required = {name for name, field in schema.model_fields.items() if field.is_required()}
+    if not required or required <= payload.keys():
+        return payload
+
+    stripped = {key.lstrip("_"): value for key, value in payload.items()}
+    if required <= stripped.keys():
+        return stripped
+
+    if len(payload) == 1:
+        inner = next(iter(payload.values()))
+        if isinstance(inner, dict) and required <= inner.keys():
+            return inner
+
+    return payload
 
 #: Retries wait `base_delay * 2**attempt`, jittered. Full jitter (uniform over
 #: the whole window, not delay±10%) is what actually de-synchronises a fleet of
@@ -60,6 +102,18 @@ class RetryExhausted(RuntimeError):
         self.cause = cause
 
 
+class EmptyToolArguments(ValueError):
+    """The endpoint reported a tool call but sent no arguments to validate.
+
+    Distinguished from a schema violation because the two mean different things:
+    a schema violation is the model answering badly, while this is the transport
+    losing the answer — measured at roughly 7% of calls against one proxy, with
+    `finish_reason: tool_calls` and an empty `content`. Naming it keeps that
+    countable in a run report instead of appearing as a puzzling "field required"
+    error against an empty dict.
+    """
+
+
 class OpenAIStructuredLLM:
     """Real `StructuredLLM` over an OpenAI-compatible `/chat/completions`.
 
@@ -80,7 +134,13 @@ class OpenAIStructuredLLM:
     def __init__(self, config: TeacherConfig) -> None:
         from openai import AsyncOpenAI
 
-        self._client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key)
+        # TeacherClient owns the retry policy and accounting. Disabling the SDK's
+        # hidden retries keeps the configured attempt count and backoff truthful.
+        self._client = AsyncOpenAI(
+            base_url=config.base_url,
+            api_key=config.api_key,
+            max_retries=0,
+        )
         self._config = config
         self.last_usage: tuple[int, int] = (0, 0)
 
@@ -137,7 +197,13 @@ class OpenAIStructuredLLM:
         function = getattr(call, "function", None)
         if function is None:
             raise ValueError("model returned no function tool call for structured output")
-        return schema.model_validate(json.loads(function.arguments))
+        payload = json.loads(function.arguments)
+        if not payload:
+            raise EmptyToolArguments(
+                f"endpoint returned a tool call with empty arguments "
+                f"({function.arguments!r}); the answer was lost in transport"
+            )
+        return schema.model_validate(_unwrap_arguments(payload, schema))
 
 
 class TeacherClient:
@@ -178,7 +244,7 @@ class TeacherClient:
 
     async def call(
         self,
-        messages: list[ChatMsg],
+        messages: MessageSource,
         schema: type[_T],
         *,
         cache_extra: Any = None,
@@ -189,11 +255,16 @@ class TeacherClient:
         request without appearing in `messages` — a per-request nonce makes the
         rendered prompt differ on every call, so the caller passes the stable
         identity (target, sense, texts) instead.
+
+        `messages` may be a callable, in which case it is invoked once per
+        attempt. Retrying byte-identical messages at temperature 0 asks a
+        deterministic backend the same question again; a caller whose prompt
+        carries a nonce should pass the renderer so each attempt differs.
         """
         key = cache_key(
             self.config.model,
             self.prompt_hash,
-            cache_extra if cache_extra is not None else messages,
+            cache_extra if cache_extra is not None else render_messages(messages),
         )
         self.stats.calls += 1
 
@@ -213,7 +284,7 @@ class TeacherClient:
         for attempt in range(self.config.max_retries):
             async with self._semaphore:
                 try:
-                    result = await self._llm.parse(messages, schema)
+                    result = await self._llm.parse(render_messages(messages), schema)
                 except Exception as exc:  # noqa: BLE001 - retried, then re-raised typed
                     last = exc
                 else:
@@ -229,9 +300,18 @@ class TeacherClient:
         assert last is not None  # the loop runs at least once: max_retries >= 1
         raise RetryExhausted(self.config.max_retries, last)
 
+    def invalidate(self, messages: MessageSource, *, cache_extra: Any = None) -> None:
+        """Forget a structurally decoded response rejected by caller validation."""
+        key = cache_key(
+            self.config.model,
+            self.prompt_hash,
+            cache_extra if cache_extra is not None else render_messages(messages),
+        )
+        self.cache.delete(key)
+
     async def map(
         self,
-        requests: list[tuple[list[ChatMsg], Any]],
+        requests: list[tuple[MessageSource, Any]],
         schema: type[_T],
     ) -> list[_T | RetryExhausted]:
         """Run many calls concurrently, returning failures inline rather than raising.
@@ -241,7 +321,7 @@ class TeacherClient:
         quarantine.
         """
 
-        async def run(messages: list[ChatMsg], extra: Any) -> _T | RetryExhausted:
+        async def run(messages: MessageSource, extra: Any) -> _T | RetryExhausted:
             try:
                 return await self.call(messages, schema, cache_extra=extra)
             except RetryExhausted as exc:
@@ -251,8 +331,11 @@ class TeacherClient:
 
 
 __all__ = [
+    "EmptyToolArguments",
+    "MessageSource",
     "OpenAIStructuredLLM",
     "RetryExhausted",
     "StructuredLLM",
     "TeacherClient",
+    "render_messages",
 ]

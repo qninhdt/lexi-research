@@ -26,8 +26,8 @@ from lexi_research.data.generate import (
 from lexi_research.data.jsonl_store import JsonlStore
 from lexi_research.data.label import (
     LABEL_COLUMNS,
-    label_texts,
     label_rows,
+    label_texts,
     read_texts_for_labelling,
     self_consistency_pairs,
     write_labels,
@@ -102,6 +102,7 @@ class FakeDiversifier:
                         spec_ids,
                         ["room", "garden", "kitchen", "hallway", "office", "cellar"],
                         ["airy", "warm", "quiet", "narrow", "busy", "damp"],
+                        strict=True,
                     )
                 ]
             }
@@ -290,6 +291,14 @@ class TestGenerate:
             traits=registry.traits_map(),
         )
         assert stats.reject_reasons.get("missing_spec_id") == len(spec_ids) - 1
+        assert stats.batches_failed == 1
+
+        second = FakeDiversifier()
+        resumed = await generate_batches(
+            built[:1], _client(second), store, traits=registry.traits_map()
+        )
+        assert second.calls == 1
+        assert resumed.texts == len(spec_ids)
 
     async def test_a_failed_batch_is_counted_not_raised(self, batches, tmp_path) -> None:
         built, registry = batches
@@ -376,6 +385,71 @@ class TestLabel:
         stats = await label_texts(texts, _client(second), store)
         assert second.calls == 0
         assert stats.cached == len(texts)
+
+    async def test_every_label_records_the_prompt_that_produced_it(
+        self, batches, tmp_path
+    ) -> None:
+        """A label is only meaningful against its rubric, so the rubric is stored."""
+        built, registry = batches
+        texts = await _texts(built, registry, tmp_path)
+        store = JsonlStore(tmp_path / "labels.jsonl")
+        client = _client(FakeGrader())
+
+        await label_texts(texts, client, store)
+
+        rows = label_rows(store)
+        assert rows
+        assert all(row["prompt_hash"] == client.prompt_hash for row in rows)
+
+    async def test_resuming_under_a_changed_prompt_refuses(self, batches, tmp_path) -> None:
+        """The trap this guards: resume skips by log id *before* the cache is read.
+
+        A prompt edit therefore does not invalidate work the log already covers, so
+        without this check the run would grade only the missing rows and the
+        artifact would hold two rubrics with nothing to tell them apart.
+        """
+        from lexi_research.data.label import PromptMismatch
+
+        built, registry = batches
+        texts = await _texts(built, registry, tmp_path)
+        store = JsonlStore(tmp_path / "labels.jsonl")
+        await label_texts(texts, _client(FakeGrader()), store)
+
+        edited = TeacherClient(
+            _config(), cache=NullCache(), llm=FakeGrader(), prompt_hash="a-different-rubric"
+        )
+        with pytest.raises(PromptMismatch, match="two rubrics"):
+            await label_texts(texts, edited, store)
+
+    async def test_the_refusal_names_both_rubrics(self, batches, tmp_path) -> None:
+        """The operator has to choose, so the message must say what it found."""
+        from lexi_research.data.label import PromptMismatch
+
+        built, registry = batches
+        texts = await _texts(built, registry, tmp_path)
+        store = JsonlStore(tmp_path / "labels.jsonl")
+        original = _client(FakeGrader())
+        await label_texts(texts, original, store)
+
+        edited = TeacherClient(
+            _config(), cache=NullCache(), llm=FakeGrader(), prompt_hash="beefbeefbeefbeef"
+        )
+        with pytest.raises(PromptMismatch) as caught:
+            await label_texts(texts, edited, store)
+
+        message = str(caught.value)
+        assert original.prompt_hash[:12] in message
+        assert "beefbeefbeef" in message
+
+    async def test_an_empty_log_accepts_any_prompt(self, batches, tmp_path) -> None:
+        """A fresh run has nothing to conflict with."""
+        built, registry = batches
+        texts = await _texts(built, registry, tmp_path)
+        store = JsonlStore(tmp_path / "fresh.jsonl")
+
+        stats = await label_texts(texts, _client(FakeGrader()), store)
+
+        assert stats.labelled == len(texts)
 
     async def test_bands_are_derived_not_taken_from_the_model(self, batches, tmp_path) -> None:
         """`grammar` and `naturalness` come from the formula, never from the payload."""

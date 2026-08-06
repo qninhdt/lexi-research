@@ -160,6 +160,20 @@ def _profile_for(rng: random.Random, registry: ProfileRegistry, meaning_req: int
     return rng.choice(list(candidates))
 
 
+def _ranked(senses: Sequence[Sense], seed: int) -> list[Sense]:
+    """Every sense in a stable seeded order, independent of how many are wanted.
+
+    A per-sense hash rather than `rng.sample`: `sample(pool, n)` draws a
+    *combination*, so its result depends on `n`. Ranking once and slicing means
+    the first 84 of a 1000-sense draw are exactly the 84 a smaller draw returned,
+    which is what lets a dataset grow without re-paying for what it already has.
+    """
+    return sorted(
+        senses,
+        key=lambda sense: hashlib.sha256(f"{seed}|{sense.sense_uid}".encode()).hexdigest(),
+    )
+
+
 def sample_senses(
     senses: Sequence[Sense],
     count: int,
@@ -174,14 +188,22 @@ def sample_senses(
     the Phase 8 subgroup has no usable sample size, too many and the dataset stops
     resembling the product's traffic.
 
-    Sampling is over senses sorted by `sense_uid`, so the result depends only on
-    the seed and the pool contents — not on Parquet row order.
+    **Nested in `count`.** The result for a smaller `count` is a prefix of the
+    result for a larger one, within each of the two strata. This is what makes
+    incremental generation affordable: raising `sample.pilot_senses` from 84 to
+    1000 re-draws the same first 84 senses, whose `batch_uid`s are unchanged, so
+    the response cache serves them and only the new senses cost calls. Drawing a
+    fresh combination per size instead would discard almost everything already
+    paid for — measured at 14 of 84 surviving a 84 -> 1000 change.
+
+    Ordering depends only on the seed and each sense's own `sense_uid`, so adding
+    rows to the pool does not reshuffle the senses already drawn, and Parquet row
+    order never enters.
     """
     if count <= 0:
         return []
 
-    rng = random.Random(seed)
-    ordered = sorted(senses, key=lambda s: s.sense_uid)
+    ordered = _ranked(senses, seed)
     multiword = [s for s in ordered if s.is_multiword]
     single = [s for s in ordered if not s.is_multiword]
 
@@ -191,9 +213,10 @@ def sample_senses(
     # returning fewer senses than asked for.
     want_multi = min(len(multiword), count - want_single)
 
-    picked = rng.sample(multiword, want_multi) + rng.sample(single, want_single)
-    rng.shuffle(picked)
-    return picked
+    # Slicing the two ranked strata keeps the prefix property per stratum. The
+    # concatenation order is deterministic, and `build_batches` derives each
+    # sense's RNG stream from its own uid, so no downstream result depends on it.
+    return multiword[:want_multi] + single[:want_single]
 
 
 def build_batches(

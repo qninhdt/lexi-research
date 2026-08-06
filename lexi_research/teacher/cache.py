@@ -125,6 +125,25 @@ class ResponseCache:
                 os.fsync(handle.fileno())
             self.writes += 1
 
+    def delete(self, key: str) -> None:
+        """Invalidate one entry by appending a tombstone.
+
+        Structured decoding can succeed while a domain-level contract still
+        fails, such as a diversifier omitting one requested spec. Removing that
+        response ensures resume asks the provider again instead of replaying a
+        permanently incomplete batch.
+        """
+        with self._lock:
+            prefix = key[:_SHARD_WIDTH]
+            entries = self._load_shard(prefix)
+            entries.pop(key, None)
+            self.root.mkdir(parents=True, exist_ok=True)
+            line = json.dumps({"key": key, "response": None})
+            with self._shard_path(key).open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+
     @property
     def lookups(self) -> int:
         return self.hits + self.misses
@@ -161,6 +180,9 @@ class NullCache(ResponseCache):
 
     def put(self, key: str, response: Any) -> None:  # noqa: ARG002 - signature is the point
         del key, response
+
+    def delete(self, key: str) -> None:  # noqa: ARG002 - signature is the point
+        del key
 
 
 __all__ = ["NullCache", "ResponseCache", "cache_key"]

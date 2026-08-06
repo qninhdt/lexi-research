@@ -95,7 +95,7 @@ class TeacherConfig:
         """Build from environment variables; secrets never live in tracked files.
 
         Reads `LEXI_TEACHER_BASE_URL`, `LEXI_TEACHER_API_KEY`, `LEXI_TEACHER_MODEL`,
-        and the optional `LEXI_TEACHER_{TEMPERATURE,METHOD,REASONING_EFFORT,CONCURRENCY}`.
+        and optional runtime/accounting controls under `LEXI_TEACHER_*`.
         """
         missing = [
             name
@@ -118,6 +118,14 @@ class TeacherConfig:
             kwargs["reasoning_effort"] = value
         if value := env.get("LEXI_TEACHER_CONCURRENCY"):
             kwargs["concurrency"] = int(value)
+        if value := env.get("LEXI_TEACHER_MAX_RETRIES"):
+            kwargs["max_retries"] = int(value)
+        if value := env.get("LEXI_TEACHER_BASE_DELAY"):
+            kwargs["base_delay"] = float(value)
+        if value := env.get("LEXI_TEACHER_PROMPT_COST_PER_MTOK"):
+            kwargs["prompt_cost_per_mtok"] = float(value)
+        if value := env.get("LEXI_TEACHER_COMPLETION_COST_PER_MTOK"):
+            kwargs["completion_cost_per_mtok"] = float(value)
         kwargs.update(overrides)
         return cls(**kwargs)
 

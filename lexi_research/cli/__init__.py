@@ -76,7 +76,11 @@ def _handle_data_sample(config: Config, args: argparse.Namespace) -> int:
     from lexi_research.data.stages import run_sample
 
     return _report(
-        "sample", config, run_sample(config, pool=args.pool, out=args.out, full=args.full)
+        "sample",
+        config,
+        run_sample(
+            config, pool=args.pool, out=args.out, full=args.full, senses=args.senses
+        ),
     )
 
 
@@ -96,6 +100,38 @@ def _handle_data_label(config: Config, args: argparse.Namespace) -> int:
     return _report(
         "label", config, run_label(config, texts=args.texts, out=args.out, cache=args.cache)
     )
+
+
+def _handle_data_pilot_gate(config: Config, args: argparse.Namespace) -> int:
+    from lexi_research.data.stages import run_pilot_gate
+
+    return _report(
+        "pilot_gate",
+        config,
+        run_pilot_gate(
+            config,
+            texts=args.texts,
+            labels=args.labels,
+            generate_report=args.generate_report,
+            out=args.out,
+            cache=args.cache,
+        ),
+    )
+
+
+def _handle_data_publish(config: Config, args: argparse.Namespace) -> int:
+    """Publish the teacher-generated dataset. Stage A is excluded by licence."""
+    del config
+    from lexi_research.data.publish_hf import main as publish_main
+
+    argv = ["--repo-id", args.repo_id]
+    if args.private:
+        argv.append("--private")
+    if args.dry_run:
+        argv.append("--dry-run")
+    if args.card_out:
+        argv += ["--card-out", args.card_out]
+    return publish_main(argv)
 
 
 def _handle_data_gec_import(config: Config, args: argparse.Namespace) -> int:
@@ -506,6 +542,16 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument(
         "--full", action="store_true", help="sample.full_senses instead of sample.pilot_senses"
     )
+    sample.add_argument(
+        "--senses",
+        type=int,
+        default=None,
+        help=(
+            "draw exactly this many senses, overriding the configured counts. "
+            "The draw is nested, so raising it re-draws the same senses first and "
+            "only the new ones cost teacher calls"
+        ),
+    )
     sample.set_defaults(handler=_handle_data_sample)
 
     generate = data.add_parser("generate", parents=[common], help="call 1: write sentences")
@@ -520,6 +566,18 @@ def build_parser() -> argparse.ArgumentParser:
     label.add_argument("--cache", default=".cache/teacher")
     label.set_defaults(handler=_handle_data_label)
 
+    pilot = data.add_parser(
+        "pilot-gate",
+        parents=[common],
+        help="re-grade a sample and evaluate the automatic pilot gates",
+    )
+    pilot.add_argument("--texts", default="data/raw/raw_texts.parquet")
+    pilot.add_argument("--labels", default="data/raw/raw_labels.parquet")
+    pilot.add_argument("--generate-report", default="data/raw/generate-report.json")
+    pilot.add_argument("--out", default="reports")
+    pilot.add_argument("--cache", default=".cache/teacher")
+    pilot.set_defaults(handler=_handle_data_pilot_gate)
+
     gec = data.add_parser(
         "gec-import",
         parents=[common],
@@ -528,6 +586,19 @@ def build_parser() -> argparse.ArgumentParser:
     gec.add_argument("--corpus", default="data/corpora/wi_locness")
     gec.add_argument("--out", default="data/gec")
     gec.set_defaults(handler=_handle_data_gec_import)
+
+    publish = data.add_parser(
+        "publish",
+        parents=[common],
+        help="publish the teacher-generated dataset to the Hugging Face Hub",
+    )
+    publish.add_argument("--repo-id", required=True, help="e.g. your-name/lexi-grader-sft")
+    publish.add_argument("--private", action="store_true")
+    publish.add_argument(
+        "--dry-run", action="store_true", help="print the card and the upload list only"
+    )
+    publish.add_argument("--card-out", default=None)
+    publish.set_defaults(handler=_handle_data_publish)
 
     process = data.add_parser(
         "process", parents=[common], help="validate, balance and split in one pass"

@@ -26,9 +26,8 @@ An edit is written `[original>replacement:tag]`:
 Rules:
 
 - If the sentence needs no changes, return it **verbatim**, with no brackets.
-- An insert stands alone between two spaces: `went [>to:prep] school`.
 - A literal `[` or `]` in the learner's own text is escaped as `\[` and `\]`.
-- Never emit an edit with both sides empty (`[>:tag]`).
+- Never emit an edit with both sides empty (`[>:tag]`), or with identical sides.
 - Mark the **smallest span** that fixes the problem. Prefer several small edits
   over one long rewrite.
 - Do not improve style in text you have not marked. Rephrasing an untouched part
@@ -36,6 +35,21 @@ Rules:
 - If the sentence is so garbled that you cannot recover the intended meaning,
   return `null` for `correction`. Do not invent edits for an unreadable sentence,
   and do not use `null` merely because there are many errors.
+
+## Reconstruction — the check that discards a grading
+
+Every `[A>B:tag]` collapses to `A` and every `[>B:tag]` is removed; the result
+must equal the learner's sentence **character for character**. Read your answer
+back that way before returning it.
+
+**Never put a space inside either side of an edit.** Deleting a word leaves a
+double space — that is correct and not yours to fix. Write `with [a>:art] crumbled`,
+never `with [a >:art] crumbled`. This one mistake causes most discarded gradings.
+
+To replace a word, quote it on the left (`soft [for>on:prep] skin`, not
+`soft [>on:prep] skin`). To delete, leave the right empty. To insert, leave the
+left empty. If you rewrite several words, use one edit spanning them all rather
+than deleting some and inserting others.
 
 # Field 1b — the tag set (exactly these 16, lowercase)
 
@@ -58,8 +72,19 @@ Rules:
 | `unnat` | grammatical but not how a native speaker would say it; also register and wordiness |
 | `other` | a real error that none of the above fits |
 
-Use `other` when nothing fits. Do not force an error into a nearby tag — `other`
-is how we discover what the tag set is missing.
+Use `other` only for a real error that fits none of the fifteen above. It is not
+a default, and not shorthand for "several things at once" — mark those separately.
+Measured on a pilot, most `other` edits belonged elsewhere:
+
+- **Missing or broken negation and auxiliaries** (`not know` → `did not know`,
+  `no can` → `cannot`): `tense` when the time reference is unmarked, `agr` when
+  the auxiliary disagrees with the subject, `form` when the verb shape is wrong.
+- **A missing verb or copula** (`The room very cold`): `agr` if a form of *be* is
+  missing, else `form`.
+- **A double negative** (`did not explain nothing`): `form`.
+- **A grammatical but non-idiomatic rewrite**: `unnat`.
+- **Adding or dropping an article, preposition or particle**: `art`, `prep`,
+  `part`. An edit is not `other` merely because it removes a word.
 
 There is **no tag for wrong meaning**. Wrong meaning is not a span you can fix by
 replacement; it is reported through `meaning` below.
@@ -70,15 +95,23 @@ How well does the sentence use the target word **in the sense you were given**?
 Judge the sense only. Grammar mistakes do not lower `meaning`, and a
 grammatically perfect sentence does not raise it.
 
-Worked example. Target `bright`, sense *"full of light"*:
+Ask these in order and stop at the first `yes`. Worked example: target `bright`,
+sense *"full of light"*.
 
-| Band | Criterion | Example |
+| Band | Ask | Example |
 |---|---|---|
-| 4 | Correct sense, no drift | *The room was bright and airy.* |
-| 3 | Correct sense, slight nuance drift | *Her bright lamp helped me read.* (the lamp emits light rather than the space being full of it) |
-| 2 | Ambiguous — genuinely readable as another sense | *She had a bright future in the sunny office.* |
-| 1 | Right word, slipped to a near sense | *She's a bright student.* (= clever) |
-| 0 | Wrong sense entirely, or the target word is absent | *The music was bright yesterday.* |
+| 0 | Absent, or a sense unrelated to the one given? | *The music was bright yesterday.* |
+| 1 | A different sense of the word a dictionary lists separately? | *She's a bright student.* (= clever) |
+| 2 | Readable either way by a careful reader? | *She had a bright future in the sunny office.* |
+| 3 | The given sense but stretched — odd collocation, wrong subject, figurative use of a literal sense? | *Her bright lamp helped me read.* (a lamp emits light rather than being full of it) |
+| 4 | Otherwise | *The room was bright and airy.* |
+
+**Do not collapse to 0 and 4.** Bands 1-3 are the normal outcome for a learner
+who knows a word roughly but not exactly, which is most learners. Work down the
+questions rather than reaching for 0 — 0 means *unrelated or absent*, not *wrong*.
+
+**Band 4 is not a reward for fluency.** A clumsy, error-filled sentence that uses
+the sense exactly is a 4; a polished sentence that drifts is not.
 
 If the learner never uses the target word (in any form), `meaning` is 0.
 Inflected and derived forms count as using it (`brightly`, `brighter`).

@@ -232,11 +232,19 @@ def test_teacher_config_from_env_reads_optionals() -> None:
             "LEXI_TEACHER_MODEL": "teacher-1",
             "LEXI_TEACHER_METHOD": "function_calling",
             "LEXI_TEACHER_CONCURRENCY": "4",
+            "LEXI_TEACHER_MAX_RETRIES": "6",
+            "LEXI_TEACHER_BASE_DELAY": "0.25",
+            "LEXI_TEACHER_PROMPT_COST_PER_MTOK": "3.0",
+            "LEXI_TEACHER_COMPLETION_COST_PER_MTOK": "15.0",
         }
     )
 
     assert config.method == "function_calling"
     assert config.concurrency == 4
+    assert config.max_retries == 6
+    assert config.base_delay == 0.25
+    assert config.prompt_cost_per_mtok == 3.0
+    assert config.completion_cost_per_mtok == 15.0
     assert config.temperature == 0.0
 
 
@@ -249,3 +257,107 @@ def test_unknown_cost_reports_zero_rather_than_guessing() -> None:
 
 def test_client_teacher_client_is_exported() -> None:
     assert TeacherClient.__module__.endswith("teacher.client")
+
+
+class TestMessageSource:
+    """A retry must be able to change the request, not just repeat it.
+
+    Measured against one proxy: roughly 7% of gradings return empty tool
+    arguments, and re-asking with byte-identical messages left a residue of rows
+    that failed every attempt, while re-rendering the prompt recovered all of
+    them. That makes "each attempt renders again" a property worth pinning.
+    """
+
+    async def test_a_callable_is_rendered_once_per_attempt(self, client_factory) -> None:
+        llm = FlakyLLM(PAYLOAD, failures=2)
+        client = client_factory(llm)
+        rendered = 0
+
+        def messages() -> list[dict[str, str]]:
+            nonlocal rendered
+            rendered += 1
+            return [{"role": "user", "content": f"attempt {rendered}"}]
+
+        result = await client.call(messages, GraderOutput, cache_extra={"row": 1})
+
+        assert result.meaning == 4
+        assert llm.calls == 3
+        assert rendered == 3
+        # Each attempt genuinely differed, which is the whole point.
+        assert [msg[0]["content"] for msg in llm.messages] == [
+            "attempt 1",
+            "attempt 2",
+            "attempt 3",
+        ]
+
+    async def test_a_plain_list_still_works(self, client_factory) -> None:
+        """The list form stays valid: most callers have no nonce to refresh."""
+        llm = FakeLLM(PAYLOAD)
+        client = client_factory(llm)
+
+        result = await client.call(MESSAGES, GraderOutput)
+
+        assert result.meaning == 4
+        assert llm.messages == [MESSAGES]
+
+    async def test_a_cache_hit_never_renders(self, client_factory, tmp_path) -> None:
+        """Rendering is cheap but a nonce-bearing prompt must not key the cache."""
+        from lexi_research.teacher import ResponseCache
+
+        cache = ResponseCache(tmp_path / "cache")
+        calls = 0
+
+        def messages() -> list[dict[str, str]]:
+            nonlocal calls
+            calls += 1
+            return [{"role": "user", "content": f"nonce {calls}"}]
+
+        first = client_factory(FakeLLM(PAYLOAD), cache=cache)
+        await first.call(messages, GraderOutput, cache_extra={"row": 7})
+
+        second_llm = FakeLLM(PAYLOAD)
+        second = client_factory(second_llm, cache=cache)
+        result = await second.call(messages, GraderOutput, cache_extra={"row": 7})
+
+        assert second_llm.calls == 0
+        assert result.meaning == 4
+        # One render for the paid call; the cache hit needed none.
+        assert calls == 1
+
+
+class TestToolArgumentRecovery:
+    """Shapes this proxy actually returned, and what the client does with them."""
+
+    def _unwrap(self, payload: dict) -> dict:
+        from lexi_research.teacher.client import _unwrap_arguments
+
+        return _unwrap_arguments(payload, GraderOutput)
+
+    def test_a_well_formed_payload_is_untouched(self) -> None:
+        assert self._unwrap(PAYLOAD) == PAYLOAD
+
+    def test_underscore_prefixed_fields_are_stripped(self) -> None:
+        """Observed: `{"__correction": ..., "__meaning": 4, "__feedback": ...}`."""
+        wrapped = {f"__{key}": value for key, value in PAYLOAD.items()}
+        assert self._unwrap(wrapped) == PAYLOAD
+
+    def test_a_single_placeholder_wrapper_is_unnested(self) -> None:
+        """Observed: the schema nested under `$PARAMETER_NAME` or `corrections`."""
+        for key in ("$PARAMETER_NAME", "corrections"):
+            assert self._unwrap({key: PAYLOAD}) == PAYLOAD
+
+    def test_an_unrecognised_shape_is_passed_through_to_fail_validation(self) -> None:
+        """A genuinely wrong payload must still be rejected, not coerced."""
+        odd = {"verdict": "looks fine", "score": 9}
+        assert self._unwrap(odd) == odd
+
+    def test_two_unknown_keys_are_not_unnested(self) -> None:
+        """Unnesting only one key keeps the rule from guessing at real ambiguity."""
+        odd = {"a": PAYLOAD, "b": PAYLOAD}
+        assert self._unwrap(odd) == odd
+
+    def test_empty_arguments_are_named_rather_than_a_schema_error(self) -> None:
+        """`{}` with `finish_reason: tool_calls` is transport loss, not a bad answer."""
+        from lexi_research.teacher import EmptyToolArguments
+
+        assert issubclass(EmptyToolArguments, ValueError)

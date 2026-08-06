@@ -52,6 +52,11 @@ from .jsonl_store import JsonlStore
 #: The spec columns (`meaning_req`, `error_spec`, `profile_id`) are deliberately
 #: absent: they live on the text side, and keeping them out of the label artifact
 #: is what makes "the spec is not a label" checkable rather than aspirational.
+#:
+#: `prompt_hash` is present because a label is only meaningful against the rubric
+#: that produced it. Without it, a run that resumed across a prompt edit yields a
+#: dataset holding two rubrics with no way to tell the rows apart — and every
+#: aggregate over it silently averages the two.
 LABEL_COLUMNS: tuple[str, ...] = (
     "req_uid",
     "sense_uid",
@@ -65,6 +70,7 @@ LABEL_COLUMNS: tuple[str, ...] = (
     "n_edits",
     "n_words",
     "pass_index",
+    "prompt_hash",
 )
 
 #: The fields call 2 is allowed to read off a text row. Anything else on the row
@@ -188,13 +194,19 @@ async def grade_one(
 
     Returns `None` when every retry failed: one unlucky row must not abort a run
     that has already paid for thousands of others.
+
+    The prompt is passed as a renderer rather than a rendered list so each attempt
+    carries a fresh nonce. Measured on this proxy, about 7% of gradings return
+    empty tool arguments, and re-asking with identical bytes at temperature 0
+    leaves a residue of rows that fail every attempt; re-rendering recovered all
+    of them.
     """
     view = graded_view(row)
-    messages = render_grader_prompt(
-        view["target"],
-        SenseRef(definition=view["definition"], pos=view["pos"]),
-        view["text"],
-    )
+    sense = SenseRef(definition=view["definition"], pos=view["pos"])
+
+    def messages() -> list[Any]:
+        return render_grader_prompt(view["target"], sense, view["text"])
+
     try:
         return await client.call(
             messages, GraderOutput, cache_extra=_cache_identity(view, pass_index)
@@ -210,6 +222,7 @@ def label_row(
     stats: LabelStats,
     *,
     pass_index: int = 0,
+    prompt_hash: str = "",
 ) -> dict[str, Any] | None:
     """Validate a grading and build its label row, or count why it was rejected."""
     payload = {
@@ -240,7 +253,42 @@ def label_row(
         "n_edits": len(edits) if edits is not None else 0,
         "n_words": len(str(row["text"]).split()),
         "pass_index": pass_index,
+        "prompt_hash": prompt_hash,
     }
+
+
+class PromptMismatch(RuntimeError):
+    """The resume log holds labels written under a different grading rubric.
+
+    Raised rather than silently continuing because `label_texts` skips by log id
+    *before* the response cache is consulted. A prompt edit therefore does not
+    invalidate work the log already covers: the run would grade only the rows that
+    happen to be missing, and the artifact would hold two rubrics with no marker
+    distinguishing them. Every aggregate over such a file — the band distribution,
+    the gate, the ceiling — silently averages across both.
+    """
+
+    def __init__(self, found: set[str], current: str) -> None:
+        known = ", ".join(sorted(value[:12] or "<unrecorded>" for value in found))
+        super().__init__(
+            f"data/raw/label.jsonl holds labels graded under prompt(s) [{known}] but the "
+            f"current prompt is {current[:12]}. Delete the log to re-grade every row "
+            f"under one rubric, or restore the previous prompt. Resuming would mix "
+            f"two rubrics in one dataset with no way to tell the rows apart."
+        )
+        self.found = found
+        self.current = current
+
+
+def _assert_one_prompt(store: JsonlStore, prompt_hash: str) -> None:
+    """Refuse to extend a log written under a different rubric."""
+    found = {
+        str(record.get("prompt_hash", ""))
+        for record in store.read()
+        if "meaning" in record
+    }
+    if found and found != {prompt_hash}:
+        raise PromptMismatch(found, prompt_hash)
 
 
 async def label_texts(
@@ -256,9 +304,15 @@ async def label_texts(
 
     One call per sentence, deliberately: this prompt is the inference contract,
     and a batched variant of it would not be the prompt the student runs.
+
+    Refuses to extend a log whose labels were graded under a different prompt.
+    Resume skips by log id before the cache is reached, so a prompt edit would
+    otherwise leave most rows untouched and produce a two-rubric dataset.
     """
     band_config = config if config is not None else BandConfig.from_json(default_config_path())
     stats = LabelStats()
+    prompt_hash = client.prompt_hash
+    _assert_one_prompt(store, prompt_hash)
 
     done = store.completed_ids()
     pending = [row for row in rows if _log_id(str(row["req_uid"]), pass_index) not in done]
@@ -275,7 +329,14 @@ async def label_texts(
             if output is None:
                 stats.failed += 1
                 return
-            label = label_row(row, output, band_config, stats, pass_index=pass_index)
+            label = label_row(
+                row,
+                output,
+                band_config,
+                stats,
+                pass_index=pass_index,
+                prompt_hash=prompt_hash,
+            )
             if label is not None:
                 store.append(label)
 
@@ -390,6 +451,7 @@ def write_labels(rows: Sequence[dict[str, Any]], path: str | Path) -> int:
         "n_edits": pa.int32(),
         "n_words": pa.int32(),
         "pass_index": pa.int32(),
+        "prompt_hash": pa.string(),
     }
     schema = pa.schema([pa.field(name, types[name]) for name in LABEL_COLUMNS])
     ordered = sorted(rows, key=lambda row: (str(row["req_uid"]), int(row.get("pass_index", 0))))
@@ -406,6 +468,7 @@ def write_labels(rows: Sequence[dict[str, Any]], path: str | Path) -> int:
 __all__ = [
     "LABEL_COLUMNS",
     "LabelStats",
+    "PromptMismatch",
     "grade_one",
     "graded_view",
     "label_row",

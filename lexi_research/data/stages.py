@@ -31,7 +31,14 @@ from lexi_research.teacher.schemas import DiversifySpec
 
 from .generate import generate_batches, text_rows, write_texts
 from .jsonl_store import JsonlStore
-from .label import label_rows, label_texts, read_texts_for_labelling, write_labels
+from .label import (
+    PromptMismatch,
+    label_rows,
+    label_texts,
+    read_texts_for_labelling,
+    self_consistency_pairs,
+    write_labels,
+)
 from .process import process_parquet
 from .profiles import load_profiles
 from .sample_batches import (
@@ -64,19 +71,38 @@ def _teacher_client(config: Config, cache_dir: Path) -> Any:
     )
 
 
-def run_sample(config: Config, *, pool: str | Path, out: str | Path, full: bool) -> dict[str, Any]:
-    """Draw senses and build call-1 batches. Deterministic given the seed."""
+def run_sample(
+    config: Config,
+    *,
+    pool: str | Path,
+    out: str | Path,
+    full: bool,
+    senses: int | None = None,
+) -> dict[str, Any]:
+    """Draw senses and build call-1 batches. Deterministic given the seed.
+
+    `senses` overrides the configured pilot/full counts. The draw is nested in the
+    count, so raising it redraws the senses already generated — with the same
+    `batch_uid`s, which the response cache serves — and only the new senses reach
+    the network. That is what makes growing a dataset in affordable steps work.
+    """
     section = dict(config.section("sample"))
-    senses = read_pool(pool)
-    count = int(section["full_senses" if full else "pilot_senses"])
+    pool_senses = read_pool(pool)
+    if senses is not None and senses <= 0:
+        raise StageError(f"--senses must be positive, got {senses}")
+    count = (
+        senses
+        if senses is not None
+        else int(section["full_senses" if full else "pilot_senses"])
+    )
     picked = sample_senses(
-        senses,
+        pool_senses,
         count,
         seed=int(section["seed"]),
         multiword_share=float(section["multiword_share"]),
     )
     if not picked:
-        raise StageError(f"sampled no senses from a pool of {len(senses)}")
+        raise StageError(f"sampled no senses from a pool of {len(pool_senses)}")
 
     meaning_weights, error_weights = load_weights(section)
     batches, stats = build_batches(
@@ -90,7 +116,8 @@ def run_sample(config: Config, *, pool: str | Path, out: str | Path, full: bool)
     out_dir = Path(out)
     rows = write_specs(batches, int(section["seed"]), out_dir / "batch_specs.parquet")
     report = {
-        "pool_senses": len(senses),
+        "pool_senses": len(pool_senses),
+        "requested_senses": count,
         "batches": len(batches),
         "specs": rows,
         **stats.as_dict(),
@@ -119,7 +146,13 @@ def run_generate(
         )
     )
     written = write_texts(text_rows(store), out_dir / "raw_texts.parquet")
-    report = {**stats.as_dict(), "texts_written": written, "cost": round(client.stats.cost, 4)}
+    report = {
+        **stats.as_dict(),
+        "texts_written": written,
+        "cost": round(client.stats.cost, 6),
+        "teacher": client.stats.as_dict(),
+        "cache": client.cache.stats(),
+    }
     write_report(out_dir / "generate-report.json", report)
     return report
 
@@ -173,7 +206,12 @@ def run_label(
     client = _teacher_client(config, Path(cache))
     store = JsonlStore(out_dir / "label.jsonl")
 
-    stats = asyncio.run(label_texts(rows, client, store))
+    try:
+        stats = asyncio.run(label_texts(rows, client, store))
+    except PromptMismatch as exc:
+        # Typed, not swallowed: continuing would build a two-rubric dataset, and
+        # the operator has to choose between re-grading and reverting the prompt.
+        raise StageError(str(exc)) from exc
     written = write_labels(label_rows(store), out_dir / "raw_labels.parquet")
     report = {
         "texts": len(rows),
@@ -185,11 +223,87 @@ def run_label(
         "reject_reasons": dict(sorted(stats.reject_reasons.items())),
         "validity_rate": round(stats.validity_rate, 4),
         "null_corrections": stats.null_corrections,
+        "meaning_counts": {str(k): v for k, v in sorted(stats.meaning_counts.items())},
+        "tag_counts": dict(sorted(stats.tag_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "other_tag_share": round(stats.other_tag_share, 4),
+        "middle_band_share": round(stats.middle_band_share, 4),
         "labels_written": written,
-        "cost": round(client.stats.cost, 4),
+        "prompt_hash": client.prompt_hash,
+        "cost": round(client.stats.cost, 6),
+        "teacher": client.stats.as_dict(),
+        "cache": client.cache.stats(),
     }
     write_report(out_dir / "label-report.json", report)
     return report
+
+
+def run_pilot_gate(
+    config: Config,
+    *,
+    texts: str | Path,
+    labels: str | Path,
+    generate_report: str | Path,
+    out: str | Path,
+    cache: str | Path,
+) -> dict[str, Any]:
+    """Measure automatic pilot gates and write the teacher-agreement ceiling."""
+    from lexi_research.teacher import NullCache, TeacherClient
+
+    from .pilot_gate import evaluate, measure_self_consistency
+
+    text_by_id = {
+        str(row["req_uid"]): row for row in read_texts_for_labelling(texts)
+    }
+    labels_table = pq.read_table(labels).to_pylist()
+    joined = [{**text_by_id[str(row["req_uid"])], **row} for row in labels_table]
+    if not joined:
+        raise StageError("the pilot has no accepted labels")
+
+    # Self-consistency must genuinely ask again, independent of the production
+    # cache. The stable pass_index still distinguishes the request in provider logs.
+    configured = _teacher_client(config, Path(cache))
+    client = TeacherClient(
+        configured.config,
+        cache=NullCache(),
+        prompt_hash=configured.prompt_hash,
+    )
+    pairs = asyncio.run(
+        self_consistency_pairs(
+            joined,
+            client,
+            sample=config.get_int("label.self_consistency_sample"),
+            seed=config.get_int("sample.seed"),
+        )
+    )
+    qwk, correction_f1 = measure_self_consistency(pairs)
+
+    generation = json.loads(Path(generate_report).read_text(encoding="utf-8"))
+    meanings = [int(row["meaning"]) for row in labels_table]
+    tags = [str(tag) for row in labels_table for tag in row.get("tags", [])]
+    other_share = tags.count("other") / len(tags) if tags else 0.0
+    # Call 2 is deliberately single-item at both generation and inference, so
+    # G6 holds by construction rather than by extrapolation.
+    report = evaluate(
+        self_consistency_qwk=qwk,
+        self_consistency_edit_f1=correction_f1,
+        meanings=meanings,
+        format_validity=len(labels_table) / max(len(text_by_id), 1),
+        mean_distinct2=float(generation.get("mean_distinct2", 0.0)),
+        other_tag_share=other_share,
+        batch_single_qwk=1.0,
+    )
+
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report.write(out_dir / "pilot-gate.json")
+    ceiling = {
+        "meaning_qwk": round(qwk, 6),
+        "correction_edit_f1": round(correction_f1, 6),
+        "sampled": len(pairs),
+        "teacher": client.stats.as_dict(),
+    }
+    write_report(out_dir / "pilot-ceiling.json", ceiling)
+    return {**report.as_dict(), "ceiling": ceiling}
 
 
 def run_gec_import(

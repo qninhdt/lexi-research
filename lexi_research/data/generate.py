@@ -201,18 +201,28 @@ async def generate_batches(
         expected_ids = {spec.spec_id for spec in batch.specs}
         if len(returned_ids) != len(set(returned_ids)):
             stats.batches_failed += 1
+            stats.reject("duplicate_spec_id")
+            client.invalidate(messages, cache_extra=_cache_identity(batch))
             return
         if set(returned_ids) - expected_ids:
             stats.batches_failed += 1
+            stats.reject("unexpected_spec_id")
+            client.invalidate(messages, cache_extra=_cache_identity(batch))
+            return
+        if set(returned_ids) != expected_ids:
+            # Keep the batch pending. A later resume may obtain the missing rows;
+            # recording `batch_done` here would silently make them permanent.
+            stats.batches_failed += 1
+            for _ in expected_ids - set(returned_ids):
+                stats.reject("missing_spec_id")
+            client.invalidate(messages, cache_extra=_cache_identity(batch))
             return
         by_spec = {sentence.spec_id: sentence.text for sentence in result.sentences}
         accepted: list[dict[str, Any]] = []
 
         for spec in batch.specs:
             text = by_spec.get(spec.spec_id)
-            if text is None:
-                stats.reject("missing_spec_id")
-                continue
+            assert text is not None
             reason = validate_text(text)
             if reason is not None:
                 stats.reject(reason)

@@ -91,6 +91,33 @@ stages:
       - data/raw/label-report.json:
           cache: false
 
+  pilot_gate:
+    # Re-asks the teacher on a shuffled sample. This is intentionally separate
+    # from `label`: changing gate arithmetic must not invalidate paid labels.
+    cmd: >-
+      uv run lexi data pilot-gate
+      --texts data/raw/raw_texts.parquet
+      --labels data/raw/raw_labels.parquet
+      --generate-report data/raw/generate-report.json
+      --out reports
+    deps:
+      - data/raw/raw_texts.parquet
+      - data/raw/raw_labels.parquet
+      - data/raw/generate-report.json
+      - lexi_research/data/label.py
+      - lexi_research/data/pilot_gate.py
+      - lexi_research/data/stages.py
+      - lexi_research/teacher/prompts/grader_system.jinja
+      - lexi_research/teacher/prompts/grader_user.jinja
+    params:
+      - label
+      - sample.seed
+    metrics:
+      - reports/pilot-gate.json:
+          cache: false
+      - reports/pilot-ceiling.json:
+          cache: false
+
   gec_import:
     # Stage A. The only data stage that reaches no endpoint: it converts a
     # human-annotated learner corpus into the edit format with code alone, so it
