@@ -27,9 +27,17 @@ import pyarrow.parquet as pq
 
 #: Exactly what may be uploaded. Stage A (`data/gec/`) is absent by licence, and
 #: the response cache is absent because it holds raw provider payloads.
+#:
+#: The `data/clean/` splits are what someone actually trains on, so they lead. The
+#: raw pair ships alongside them because a reader who disagrees with the balancing
+#: or the split seed needs the unprocessed rows to redo it.
 UPLOAD: tuple[tuple[str, str], ...] = (
-    ("data/raw/raw_texts.parquet", "data/raw_texts.parquet"),
-    ("data/raw/raw_labels.parquet", "data/raw_labels.parquet"),
+    ("data/clean/train.parquet", "data/train.parquet"),
+    ("data/clean/val.parquet", "data/val.parquet"),
+    ("data/clean/test.parquet", "data/test.parquet"),
+    ("data/clean/data-quality.json", "reports/data-quality.json"),
+    ("data/raw/raw_texts.parquet", "raw/raw_texts.parquet"),
+    ("data/raw/raw_labels.parquet", "raw/raw_labels.parquet"),
     ("data/raw/generate-report.json", "reports/generate-report.json"),
     ("data/raw/label-report.json", "reports/label-report.json"),
     ("data/batches/sample-report.json", "reports/sample-report.json"),
@@ -69,6 +77,37 @@ def _gate_table(gate: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _split_section(quality: dict[str, Any] | None) -> list[str]:
+    """The train/val/test sizes, and the contamination check that validates them.
+
+    A split by target word is the only reason a test score means anything here:
+    one word yields many rows, so splitting by row leaks. The check is reported
+    rather than asserted in prose because a reader has no way to verify the claim
+    otherwise.
+    """
+    if not quality:
+        return ["The processed splits have not been built for this snapshot.", ""]
+    contamination = quality.get("contamination", {})
+    lines = [
+        "### Splits",
+        "",
+        "| Split | Rows |",
+        "|---|---:|",
+    ]
+    for name in ("train", "val", "test"):
+        lines.append(f"| `{name}` | {contamination.get(name, '?')} |")
+    crossing = contamination.get("cross_split_text_hashes")
+    lines += [
+        "",
+        f"Grouped by target word, not by row. Sentences appearing in more than one "
+        f"split: **{crossing if crossing is not None else 'unmeasured'}**. "
+        f"Rejected during validation: **{quality.get('rejected_rows', '?')}** of "
+        f"{quality.get('input_rows', '?')}.",
+        "",
+    ]
+    return lines
+
+
 def build_card(
     *,
     repo_id: str,
@@ -81,6 +120,8 @@ def build_card(
     ceiling: dict[str, Any] | None,
     teacher_model: str,
     teacher_endpoint: str,
+    quality: dict[str, Any] | None = None,
+    calibrated: bool = False,
 ) -> str:
     """Render the dataset card from measurements, never from assumption."""
     labels = pq.read_table(labels_path).to_pylist()
@@ -108,8 +149,11 @@ def build_card(
     lines: list[str] = [
         "---",
         "license: other",
+        # The Hub validates this against a closed list and silently drops an
+        # unknown value, so it must be a real category: `text-generation` is what
+        # a grader emitting a JSON object actually does.
         "task_categories:",
-        "  - text2text-generation",
+        "  - text-generation",
         "language:",
         "  - en",
         "tags:",
@@ -131,10 +175,11 @@ def build_card(
         "",
         "## What is in here",
         "",
-        f"- **{texts.num_rows}** generated learner sentences (`raw_texts.parquet`)",
-        f"- **{len(labels)}** accepted gradings (`raw_labels.parquet`)",
+        f"- **{texts.num_rows}** generated learner sentences (`raw/raw_texts.parquet`)",
+        f"- **{len(labels)}** accepted gradings (`raw/raw_labels.parquet`)",
         f"- **{sample_report.get('senses', 'unknown')}** distinct dictionary senses",
         "",
+        *_split_section(quality),
         "```json",
         json.dumps(
             {
@@ -247,6 +292,19 @@ def build_card(
         "- **Bands are uncalibrated** until `lexi data calibrate` has run;",
         "  `band_config.json` carries `\"calibrated\": false` when that is still true.",
         "- **`feedback` is unmeasured.** No metric in this snapshot evaluates it.",
+        *(
+            []
+            if calibrated
+            else [
+                "- **`grammar` and `naturalness` are uncalibrated.** `band_config.json` "
+                "carries `\"calibrated\": false`, so those two bands come from the shipped "
+                "design guesses rather than from this corpus's penalty distribution. "
+                "`meaning` is unaffected — it is the teacher's own answer. Calibration on "
+                "this corpus produced duplicate cut points, because 81% of rows carry no "
+                "`usage` error at all and no threshold exists inside that mass of zeros; "
+                "a five-band usage scale is not supported by data this clean.",
+            ]
+        ),
         "",
         "## Not included",
         "",
@@ -306,6 +364,13 @@ def main(argv: list[str] | None = None) -> int:
         "reports/pilot-ceiling.json"
     ).exists() else None
 
+    quality = (
+        json.loads(Path("data/clean/data-quality.json").read_text(encoding="utf-8"))
+        if Path("data/clean/data-quality.json").exists()
+        else None
+    )
+    band = json.loads(Path("band_config.json").read_text(encoding="utf-8"))
+
     import os
 
     card = build_card(
@@ -319,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
         ceiling=ceiling,
         teacher_model=os.environ.get("LEXI_TEACHER_MODEL", "unknown"),
         teacher_endpoint=os.environ.get("LEXI_TEACHER_BASE_URL", "unknown"),
+        quality=quality,
+        calibrated=bool(band.get("calibrated")),
     )
 
     if args.card_out:

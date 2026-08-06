@@ -442,6 +442,33 @@ def _quantiles(values: Sequence[float], fractions: Sequence[float]) -> list[floa
     return picked
 
 
+def _assert_distinct_thresholds(thresholds: Sequence[float], zero_share: float) -> None:
+    """Refuse cut points that erase a band.
+
+    `band_of` decrements once per threshold a penalty exceeds, so two equal cut
+    points skip a band entirely: the band exists in the config and can never be
+    assigned. Measured on the first real corpus, 81% of rows carry no `usage`
+    error at all, which put the 20th and 40th percentiles both at exactly 0.0 and
+    left band 3 empty in both groups.
+
+    That is a property of the penalty distribution, not a bug in the quantiles, so
+    it cannot be fixed by nudging a fraction — a band boundary inside a mass of
+    identical zeros does not exist. Failing here keeps the eval harness from
+    reporting a five-band metric that only ever produces four.
+    """
+    duplicates = len(thresholds) != len(set(thresholds))
+    if not duplicates:
+        return
+    raise StageError(
+        f"calibration produced duplicate cut points {list(thresholds)}, which erases a "
+        f"band: `band_of` steps once per threshold exceeded, so two equal cut points "
+        f"skip a band that can then never be assigned. {zero_share:.1%} of rows have a "
+        f"penalty of exactly 0.0, so the lower quantiles all land on it. Either target "
+        f"fewer bands, or weight the tag groups so a clean sentence is separable from a "
+        f"lightly-marked one."
+    )
+
+
 def run_calibrate(
     config: Config,
     *,
@@ -477,6 +504,10 @@ def run_calibrate(
     # the top band is the lowest quantile: band 4 is the cleanest fifth.
     fractions = [index / (bands + 1) for index in range(1, bands + 1)]
     thresholds = _quantiles(pooled, fractions)
+    # Checked before anything is written: a config saved with duplicate cut points
+    # is a config whose band metrics are quietly wrong for every later run.
+    zero_share = sum(1 for value in pooled if value == 0.0) / max(len(pooled), 1)
+    _assert_distinct_thresholds(thresholds, zero_share)
 
     payload["thresholds"] = thresholds
     payload["calibrated"] = True
@@ -495,6 +526,7 @@ def run_calibrate(
         "rows": len(rows),
         "parseable_corrections": len(by_group[TagGroup.CORRECTNESS]),
         "thresholds": thresholds,
+        "zero_penalty_share": round(zero_share, 4),
         "band_distribution": {
             group.value: dict(
                 sorted(Counter(calibrated.band_of(value) for value in by_group[group]).items())
