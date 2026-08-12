@@ -86,6 +86,72 @@ class Run:
             self._run = None
 
 
+def _build_tags(stage: str, lineage: Mapping[str, Any]) -> list[str]:
+    """Generate meaningful tags for filtering and grouping in W&B dashboard."""
+    tags = [stage]
+    cfg = lineage.get("config", {})
+    if isinstance(cfg, dict):
+        train_cfg = cfg.get("train", {})
+        if isinstance(train_cfg, dict):
+            task = train_cfg.get("task")
+            if task:
+                tags.append(f"task:{task}")
+            base_model = train_cfg.get("base_model")
+            if base_model:
+                short_model = str(base_model).split("/")[-1]
+                tags.append(f"model:{short_model}")
+        rl_cfg = cfg.get("rl", {})
+        if isinstance(rl_cfg, dict):
+            algo = rl_cfg.get("algo")
+            if algo:
+                tags.append(f"rl:{algo}")
+    gpu = lineage.get("gpu", {})
+    if isinstance(gpu, dict) and gpu.get("devices"):
+        dev_name = gpu["devices"][0].get("name")
+        if dev_name:
+            tags.append(f"gpu:{dev_name.replace(' ', '_')}")
+    git = lineage.get("git", {})
+    if isinstance(git, dict) and git.get("branch"):
+        tags.append(f"branch:{git['branch']}")
+    return tags
+
+
+def _build_notes(stage: str, lineage: Mapping[str, Any]) -> str:
+    """Generate a clean markdown summary note for the W&B run page."""
+    git = lineage.get("git", {}) or {}
+    gpu = lineage.get("gpu", {}) or {}
+    devices = ", ".join([d.get("name", "") for d in gpu.get("devices", []) if isinstance(d, dict)]) or "CPU"
+    sha = str(git.get("sha") or "unknown")
+    branch = str(git.get("branch") or "unknown")
+    dirty = " (dirty)" if git.get("dirty") else ""
+
+    return (
+        f"### Lexi-Research Run: `{stage}`\n\n"
+        f"- **Git Branch/SHA**: `{branch}` @ `{sha[:8]}`{dirty}\n"
+        f"- **Hardware**: `{devices}` (Driver: `{gpu.get('driver', 'N/A')}`)\n"
+        f"- **Lineage Hash**: `{str(lineage.get('config_sha256', 'N/A'))[:12]}`\n"
+    )
+
+
+def _setup_metric_axes(wandb_handle: Any) -> None:
+    """Define metric step alignments so custom charts and step curves plot cleanly."""
+    try:
+        wandb_handle.define_metric("train/global_step", hidden=True)
+        wandb_handle.define_metric("train/*", step_metric="train/global_step")
+        wandb_handle.define_metric("val/*", step_metric="train/global_step")
+
+        wandb_handle.define_metric("eval/step", hidden=True)
+        wandb_handle.define_metric("eval/*", step_metric="eval/step")
+
+        wandb_handle.define_metric("rl/step", hidden=True)
+        wandb_handle.define_metric("rl/*", step_metric="rl/step")
+
+        wandb_handle.define_metric("bench/concurrency", hidden=True)
+        wandb_handle.define_metric("bench/*", step_metric="bench/concurrency")
+    except Exception:  # noqa: BLE001 - defensive fallback for mock/fake handles
+        pass
+
+
 def resolve_mode(config: Any) -> str:
     """`tracking.mode`, falling back to disabled when no key is present.
 
@@ -115,15 +181,22 @@ def start(config: Any, *, stage: str, lineage: Mapping[str, Any]) -> Run:
             f"tracking.mode={mode!r} needs wandb; install it or set tracking.mode=disabled"
         ) from exc
 
+    tags = _build_tags(stage, lineage)
+    notes = _build_notes(stage, lineage)
+
     handle = wandb.init(
         project=config.get_str("tracking.project"),
         entity=config.get_str("tracking.entity") or None,
         group=config.get_str("tracking.group") or None,
         job_type=stage,
         mode=mode,
+        tags=tags,
+        notes=notes,
         config=dict(lineage),
     )
+    _setup_metric_axes(handle)
     return Run(stage=stage, mode=mode, lineage=lineage, _run=handle)
 
 
 __all__ = ["MODES", "Run", "TrackingError", "resolve_mode", "start"]
+

@@ -117,11 +117,78 @@ def log_reliability(run: Any, bins: Sequence[Mapping[str, Any]]) -> None:
     )
 
 
+def log_per_band(run: Any, band_metrics: Mapping[str, Any]) -> None:
+    """Publish per-meaning-band metrics as a formatted wandb.Table."""
+    if not getattr(run, "active", False):
+        return
+    import wandb
+
+    rows: list[list[Any]] = []
+    for band_key, metrics in sorted(band_metrics.items()):
+        if isinstance(metrics, Mapping):
+            rows.append(
+                [
+                    str(band_key),
+                    metrics.get("accuracy", 0.0),
+                    metrics.get("mae", 0.0),
+                    metrics.get("count", 0),
+                ]
+            )
+    if rows:
+        table = wandb.Table(columns=["band", "accuracy", "mae", "count"], data=rows)
+        run.log({"eval/per_band": table})
+
+
+def log_eval_overview(run: Any, eval_metrics: Mapping[str, Any]) -> None:
+    """Publish a complete evaluation metric suite to W&B run summary and metrics."""
+    if not getattr(run, "active", False):
+        return
+
+    payload: dict[str, Any] = {}
+    for key in (
+        "qwk",
+        "exact_match",
+        "edit_f1",
+        "format_validity",
+        "mae",
+        "self_consistency",
+        "retries",
+    ):
+        if key in eval_metrics:
+            payload[f"eval/{key}"] = eval_metrics[key]
+
+    if payload:
+        run.log(payload)
+        run.summary(payload)
+
+
+def log_hardware_summary(
+    run: Any, *, peak_vram_gb: float | None = None, throughput_tokens_per_s: float | None = None
+) -> None:
+    """Publish hardware resource usage and throughput metrics."""
+    if not getattr(run, "active", False):
+        return
+
+    metrics: dict[str, Any] = {}
+    if peak_vram_gb is not None:
+        metrics["system/peak_vram_gb"] = peak_vram_gb
+    if throughput_tokens_per_s is not None:
+        metrics["system/throughput_tokens_per_s"] = throughput_tokens_per_s
+
+    if metrics:
+        run.log(metrics)
+        run.summary(metrics)
+
+
 __all__ = [
     "PANEL_GROUPS",
     "QUALITATIVE_COLUMNS",
     "log_confusion",
+    "log_eval_overview",
+    "log_hardware_summary",
+    "log_per_band",
     "log_qualitative",
     "log_reliability",
     "qualitative_rows",
 ]
+

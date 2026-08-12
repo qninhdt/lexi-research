@@ -129,7 +129,7 @@ make -f ops/Makefile smoke        # CPU, seconds
 make -f ops/Makefile smoke-gpu    # the checkpoint in train.base_model
 ```
 
-For the L4 run, install the pinned GPU matrix in `requirements-colab-l4.txt`.
+For the Colab run, install the pinned GPU matrix in `requirements-colab.txt`.
 It enables the native PyTorch SDPA path plus Qwen3.5's
 `flash-linear-attention` and `causal-conv1d` kernels; the external
 `flash-attn` package is not required. The requirements select the matching

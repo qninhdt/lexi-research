@@ -18,8 +18,11 @@ from pydantic import BaseModel, Field
 
 from lexi_research.format import MAX_BAND, MIN_BAND
 
-#: A chat message in OpenAI wire format.
+#: A chat message in the provider-neutral format consumed by the prompt registry.
 ChatMsg = dict[str, str]
+
+#: Strategies supported by LangChain's `with_structured_output`.
+STRUCTURED_METHODS: tuple[str, ...] = ("json_schema", "function_calling", "json_mode")
 
 
 class GraderOutput(BaseModel):
@@ -71,9 +74,9 @@ class TeacherConfig:
     api_key: str
     model: str
     temperature: float = 0.0
-    #: `json_schema` is strict structured output; `function_calling` is the escape
-    #: hatch for proxies that accept the schema and then ignore it.
-    method: str = "json_schema"
+    #: `json_mode` emits a JSON object in the normal text channel; the other two
+    #: strategies use provider-native schema or tool calling support.
+    method: str = "json_mode"
     reasoning_effort: str = ""
     max_retries: int = 4
     base_delay: float = 0.5
@@ -83,6 +86,13 @@ class TeacherConfig:
     #: reports as 0.0 rather than pretending to a number nobody supplied.
     prompt_cost_per_mtok: float = 0.0
     completion_cost_per_mtok: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.method not in STRUCTURED_METHODS:
+            raise ValueError(
+                f"unknown structured-output method {self.method!r}; "
+                f"expected one of {STRUCTURED_METHODS}"
+            )
 
     def cost_of(self, prompt_tokens: int, completion_tokens: int) -> float:
         return (
@@ -207,5 +217,6 @@ __all__ = [
     "DiversifySpec",
     "GraderOutput",
     "SenseRef",
+    "STRUCTURED_METHODS",
     "TeacherConfig",
 ]

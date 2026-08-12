@@ -1,10 +1,10 @@
 """The teacher client: one narrow `parse` seam over any OpenAI-compatible endpoint.
 
 Shape borrowed from `lexi-ai`'s `lexi_ai/llm.py` (read-only reference) — a
-`StructuredLLM` protocol with two structured-output modes, retry with exponential
-backoff, and a lazily built SDK client. It is copied rather than imported: this
-repo stays standalone, and a research pipeline should not pin itself to the
-product's release cadence.
+`StructuredLLM` protocol with LangChain structured-output modes, retry with
+exponential backoff, and a lazily built model client. It is copied rather than
+imported: this repo stays standalone, and a research pipeline should not pin
+itself to the product's release cadence.
 
 What is added here, because a bulk generation run needs it:
 
@@ -24,7 +24,7 @@ import asyncio
 import json
 import random
 from collections.abc import Callable
-from typing import Any, Protocol, TypeVar, cast, runtime_checkable
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
@@ -114,17 +114,60 @@ class EmptyToolArguments(ValueError):
     """
 
 
-class OpenAIStructuredLLM:
-    """Real `StructuredLLM` over an OpenAI-compatible `/chat/completions`.
+def _langchain_messages(messages: list[ChatMsg]) -> list[Any]:
+    """Convert the registry's small wire shape to LangChain messages."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    converted: list[Any] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content", "")
+        if role == "system":
+            converted.append(SystemMessage(content=content))
+        elif role == "user":
+            converted.append(HumanMessage(content=content))
+        elif role == "assistant":
+            converted.append(AIMessage(content=content))
+        else:
+            raise ValueError(f"unsupported chat message role: {role!r}")
+    return converted
+
+
+def _tool_payload(message: Any) -> dict[str, Any] | None:
+    """Read raw tool arguments when LangChain's parser could not validate them."""
+    calls = getattr(message, "tool_calls", None) or []
+    if not calls:
+        return None
+
+    call = calls[0]
+    if isinstance(call, dict):
+        arguments: Any = call.get("args")
+        function = call.get("function")
+    else:
+        arguments = getattr(call, "args", None)
+        function = getattr(call, "function", None)
+
+    if arguments is None and function is not None:
+        if isinstance(function, dict):
+            arguments = function.get("arguments")
+        else:
+            arguments = getattr(function, "arguments", None)
+    if arguments is None or arguments == "":
+        return {}
+    if isinstance(arguments, str):
+        arguments = json.loads(arguments)
+    return arguments if isinstance(arguments, dict) else {}
+
+
+class LangChainStructuredLLM:
+    """Real `StructuredLLM` over an OpenAI-compatible endpoint via LangChain.
 
     Two structured-output methods:
 
-    * `json_schema` — the SDK's native strict `chat.completions.parse`.
-    * `function_calling` — the schema as one forced tool, arguments validated
-      here. Some OpenAI-compatible proxies accept a strict `json_schema` and then
-      return loose JSON anyway; those honour tool calls reliably, so this mode is
-      the escape hatch. `probe` reports which one the configured endpoint
-      actually honours.
+    * `json_schema` — provider-native strict structured output.
+    * `function_calling` — the schema as one forced tool.
+    * `json_mode` — a JSON object in the normal text channel, parsed into the
+      Pydantic schema by LangChain.
 
     Usage is exposed through `last_usage` because the caller needs the token
     counts for accounting, and threading them through the `parse` return type
@@ -132,78 +175,78 @@ class OpenAIStructuredLLM:
     """
 
     def __init__(self, config: TeacherConfig) -> None:
-        from openai import AsyncOpenAI
+        from langchain_openai import ChatOpenAI
 
-        # TeacherClient owns the retry policy and accounting. Disabling the SDK's
-        # hidden retries keeps the configured attempt count and backoff truthful.
-        self._client = AsyncOpenAI(
-            base_url=config.base_url,
-            api_key=config.api_key,
-            max_retries=0,
-        )
+        # TeacherClient owns retry policy and accounting. Disabling LangChain's
+        # built-in retries keeps the configured attempt count truthful.
+        kwargs: dict[str, Any] = {
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+            "temperature": config.temperature,
+            "max_retries": 0,
+        }
+        if config.reasoning_effort:
+            kwargs["reasoning_effort"] = config.reasoning_effort
+        self._model = ChatOpenAI(**kwargs)
         self._config = config
         self.last_usage: tuple[int, int] = (0, 0)
 
-    def _extra(self) -> dict[str, Any] | None:
-        # Not a first-class kwarg on every SDK version or model, so it rides in
-        # extra_body where an unsupported model simply ignores it.
-        effort = self._config.reasoning_effort
-        return {"reasoning_effort": effort} if effort else None
-
     async def parse(self, messages: list[ChatMsg], schema: type[_T]) -> _T:
-        if self._config.method == "function_calling":
-            return await self._parse_via_tool(messages, schema)
-        return await self._parse_via_json_schema(messages, schema)
+        # A failed provider response must not reuse usage from the previous
+        # attempt when the outer retry loop records it.
+        self.last_usage = (0, 0)
+        options: dict[str, Any] = {
+            "method": self._config.method,
+            "include_raw": True,
+        }
+        if self._config.method in {"json_schema", "function_calling"}:
+            options["strict"] = True
+        structured = self._model.with_structured_output(schema, **options)
+        result = await structured.ainvoke(_langchain_messages(messages))
+        if not isinstance(result, dict):
+            raise ValueError("LangChain returned no structured-output envelope")
 
-    def _record_usage(self, completion: Any) -> None:
-        usage = getattr(completion, "usage", None)
-        self.last_usage = (
-            int(getattr(usage, "prompt_tokens", 0) or 0),
-            int(getattr(usage, "completion_tokens", 0) or 0),
-        )
+        raw = result.get("raw")
+        self._record_usage(raw)
+        parsing_error = result.get("parsing_error")
+        if parsing_error is not None:
+            if self._config.method == "function_calling":
+                payload = _tool_payload(raw)
+                if payload is not None:
+                    if not payload:
+                        raise EmptyToolArguments(
+                            "endpoint returned a tool call with empty arguments; "
+                            "the answer was lost in transport"
+                        )
+                    return schema.model_validate(_unwrap_arguments(payload, schema))
+            if isinstance(parsing_error, Exception):
+                raise parsing_error
+            raise ValueError(str(parsing_error))
 
-    async def _parse_via_json_schema(self, messages: list[ChatMsg], schema: type[_T]) -> _T:
-        completion = await self._client.chat.completions.parse(
-            model=self._config.model,
-            messages=messages,  # type: ignore[arg-type]
-            response_format=schema,
-            temperature=self._config.temperature,
-            extra_body=self._extra(),
-        )
-        self._record_usage(completion)
-        parsed = completion.choices[0].message.parsed
+        parsed = result.get("parsed")
         if parsed is None:
             raise ValueError("model returned no parsed structured output")
-        return parsed
+        if isinstance(parsed, schema):
+            return parsed
+        return schema.model_validate(parsed)
 
-    async def _parse_via_tool(self, messages: list[ChatMsg], schema: type[_T]) -> _T:
-        from openai import pydantic_function_tool
-
-        tool = pydantic_function_tool(schema, name="emit")
-        # The SDK's parameter types are TypedDicts; our messages are plain dicts
-        # (the wire format the fake seam also speaks). Casting at this one boundary
-        # keeps `ChatMsg` simple everywhere else.
-        completion = await self._client.chat.completions.create(
-            model=self._config.model,
-            messages=cast(Any, messages),
-            tools=[tool],
-            tool_choice=cast(Any, {"type": "function", "function": {"name": "emit"}}),
-            temperature=self._config.temperature,
-            extra_body=self._extra(),
+    def _record_usage(self, message: Any) -> None:
+        """Read usage from LangChain's normalized or provider metadata."""
+        usage = getattr(message, "usage_metadata", None) or {}
+        response_metadata = getattr(message, "response_metadata", None) or {}
+        token_usage = response_metadata.get("token_usage", {})
+        if not isinstance(token_usage, dict):
+            token_usage = {}
+        self.last_usage = (
+            int(usage.get("input_tokens", token_usage.get("prompt_tokens", 0)) or 0),
+            int(usage.get("output_tokens", token_usage.get("completion_tokens", 0)) or 0),
         )
-        self._record_usage(completion)
-        calls = completion.choices[0].message.tool_calls
-        call = calls[0] if calls else None
-        function = getattr(call, "function", None)
-        if function is None:
-            raise ValueError("model returned no function tool call for structured output")
-        payload = json.loads(function.arguments)
-        if not payload:
-            raise EmptyToolArguments(
-                f"endpoint returned a tool call with empty arguments "
-                f"({function.arguments!r}); the answer was lost in transport"
-            )
-        return schema.model_validate(_unwrap_arguments(payload, schema))
+
+
+# Keep the old import name for callers outside this repository while the
+# implementation and default construction use LangChain.
+OpenAIStructuredLLM = LangChainStructuredLLM
 
 
 class TeacherClient:
@@ -226,7 +269,7 @@ class TeacherClient:
         self.cache = cache
         self.prompt_hash = prompt_hash
         self.stats = CallStats()
-        self._llm = llm if llm is not None else OpenAIStructuredLLM(config)
+        self._llm = llm if llm is not None else LangChainStructuredLLM(config)
         self._semaphore = asyncio.Semaphore(config.concurrency)
 
     async def _sleep(self, attempt: int) -> None:
@@ -304,6 +347,7 @@ class TeacherClient:
                 try:
                     result = await self._llm.parse(render_messages(messages), schema)
                 except Exception as exc:  # noqa: BLE001 - retried, then re-raised typed
+                    self._record_usage()
                     last = exc
                 else:
                     self._record_usage()
@@ -345,6 +389,7 @@ class TeacherClient:
 
 __all__ = [
     "EmptyToolArguments",
+    "LangChainStructuredLLM",
     "MessageSource",
     "OpenAIStructuredLLM",
     "RetryExhausted",

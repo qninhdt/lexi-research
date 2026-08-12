@@ -11,6 +11,7 @@ learn a function it is never asked to compute.
 from .cache import NullCache, ResponseCache, cache_key
 from .client import (
     EmptyToolArguments,
+    LangChainStructuredLLM,
     MessageSource,
     OpenAIStructuredLLM,
     RetryExhausted,
@@ -27,6 +28,7 @@ from .registry import (
     template_names,
 )
 from .schemas import (
+    STRUCTURED_METHODS,
     CallStats,
     ChatMsg,
     DiversifiedSentence,
@@ -47,12 +49,14 @@ __all__ = [
     "DiversifySpec",
     "EmptyToolArguments",
     "GraderOutput",
+    "LangChainStructuredLLM",
     "MessageSource",
     "NullCache",
     "OpenAIStructuredLLM",
     "ResponseCache",
     "RetryExhausted",
     "SenseRef",
+    "STRUCTURED_METHODS",
     "StructuredLLM",
     "TeacherClient",
     "TeacherConfig",

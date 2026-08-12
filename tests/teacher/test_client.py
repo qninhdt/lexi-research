@@ -10,12 +10,17 @@ back typed so a bulk run can quarantine one row and keep going.
 from __future__ import annotations
 
 import asyncio
+import sys
+from dataclasses import replace
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from lexi_research.teacher import (
     CallStats,
     GraderOutput,
+    LangChainStructuredLLM,
     ResponseCache,
     RetryExhausted,
     TeacherClient,
@@ -28,6 +33,75 @@ from .conftest import FakeLLM, FlakyLLM
 
 MESSAGES = [{"role": "system", "content": "grade"}, {"role": "user", "content": "hi"}]
 PAYLOAD = {"correction": "I like it.", "meaning": 4, "feedback": "Good."}
+
+
+async def test_langchain_adapter_uses_json_mode_and_records_usage(monkeypatch, config) -> None:
+    calls: dict[str, Any] = {}
+
+    class FakeChain:
+        async def ainvoke(self, messages):
+            calls["messages"] = messages
+            return {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 12, "output_tokens": 8},
+                    response_metadata={},
+                ),
+                "parsed": GraderOutput.model_validate(PAYLOAD),
+                "parsing_error": None,
+            }
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+
+        def with_structured_output(self, schema, **kwargs):
+            calls["schema"] = schema
+            calls["options"] = kwargs
+            return FakeChain()
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=FakeChatOpenAI))
+
+    client = LangChainStructuredLLM(config)
+    result = await client.parse(MESSAGES, GraderOutput)
+
+    assert result.meaning == 4
+    assert calls["schema"] is GraderOutput
+    assert calls["options"] == {"method": "json_mode", "include_raw": True}
+    assert calls["init"]["max_retries"] == 0
+    assert [message.type for message in calls["messages"]] == ["system", "human"]
+    assert client.last_usage == (12, 8)
+
+
+async def test_langchain_adapter_recovers_wrapped_tool_arguments(monkeypatch, config) -> None:
+    class FakeChain:
+        async def ainvoke(self, messages):
+            del messages
+            wrapped = {f"__{key}": value for key, value in PAYLOAD.items()}
+            return {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 12, "output_tokens": 8},
+                    response_metadata={},
+                    tool_calls=[{"args": wrapped}],
+                ),
+                "parsed": None,
+                "parsing_error": ValueError("wrapped tool arguments"),
+            }
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def with_structured_output(self, schema, **kwargs):
+            del schema, kwargs
+            return FakeChain()
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=FakeChatOpenAI))
+
+    client = LangChainStructuredLLM(replace(config, method="function_calling"))
+    result = await client.parse(MESSAGES, GraderOutput)
+
+    assert result.meaning == 4
+    assert client.last_usage == (12, 8)
 
 
 async def test_call_returns_parsed_schema(client_factory, config) -> None:
@@ -110,6 +184,21 @@ async def test_transient_failure_is_retried(client_factory) -> None:
     assert llm.calls == 3
     assert client.stats.retries == 2
     assert client.stats.failures == 0
+
+
+async def test_failed_attempt_usage_is_accounted(client_factory) -> None:
+    llm = FlakyLLM(PAYLOAD, failures=2, usage=(1_000, 500))
+    client = client_factory(
+        llm,
+        prompt_cost_per_mtok=3.0,
+        completion_cost_per_mtok=15.0,
+    )
+
+    await client.call(MESSAGES, GraderOutput)
+
+    assert client.stats.prompt_tokens == 3_000
+    assert client.stats.completion_tokens == 1_500
+    assert client.stats.cost == pytest.approx(0.0315)
 
 
 async def test_retry_exhaustion_raises_typed_error(client_factory) -> None:
@@ -246,6 +335,13 @@ def test_teacher_config_from_env_reads_optionals() -> None:
     assert config.prompt_cost_per_mtok == 3.0
     assert config.completion_cost_per_mtok == 15.0
     assert config.temperature == 0.0
+
+
+def test_teacher_config_rejects_unknown_structured_method() -> None:
+    from lexi_research.teacher import TeacherConfig
+
+    with pytest.raises(ValueError, match="unknown structured-output method"):
+        TeacherConfig(base_url="u", api_key="k", model="m", method="text")
 
 
 def test_unknown_cost_reports_zero_rather_than_guessing() -> None:

@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="override LEXI_TEACHER_MODEL")
     parser.add_argument(
         "--method",
-        choices=("json_schema", "function_calling"),
+        choices=("json_schema", "function_calling", "json_mode"),
         help="override the structured-output mode to try first",
     )
     parser.add_argument(

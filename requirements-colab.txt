@@ -1,9 +1,29 @@
-# Install only on the GPU runtime; intentionally excluded from CPU CI.
-torch
-transformers
+# Reproducible Colab stack for Qwen3.5's hybrid linear/full attention.
+--index-url https://download.pytorch.org/whl/cu126
+--extra-index-url https://pypi.org/simple
+
+torch==2.7.1
+torchvision==0.22.1
+torchaudio==2.7.1
+transformers==5.14.1
 datasets
 trl
-peft
-bitsandbytes
+peft==0.20.0
+bitsandbytes==0.50.0
 accelerate
 wandb
+pyarrow
+ninja
+packaging
+psutil
+pydantic
+jinja2
+openai
+httpx
+fastapi
+uvicorn
+# Rust-backed parallel downloader for the Hub.
+# Install current package in editable mode
+-e .
+
+

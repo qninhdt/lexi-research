@@ -89,6 +89,12 @@ case "${MODEL_KEY}" in
     DEFAULT_BATCH_SIZE=4
     DEFAULT_GRAD_ACCUM=8
     ;;
+  qwen-0.8b|qwen0.8b|qwen3.5-0.8b|qwen0.8)
+    MODEL_KEY="qwen-0.8b"
+    MODEL_ID="Qwen/Qwen3.5-0.8B"
+    DEFAULT_BATCH_SIZE=4
+    DEFAULT_GRAD_ACCUM=8
+    ;;
   gemma|gemma4|gemma-4-e4b|gemma-4-e4b-it)
     MODEL_KEY="gemma"
     MODEL_ID="google/gemma-4-E4B-it"
@@ -146,10 +152,7 @@ if ! git diff --quiet HEAD 2>/dev/null; then
   echo "         '${BRANCH}' from GitHub and will not see them." >&2
 fi
 
-case "${GPU_KEY}" in
-  L4) REQUIREMENTS_FILE="requirements-colab-l4.txt" ;;
-  *) REQUIREMENTS_FILE="requirements-colab.txt" ;;
-esac
+REQUIREMENTS_FILE="requirements-colab.txt"
 
 # Values are embedded in the remote Python snippets below. Keep paths and
 # scalar overrides deliberately shell-safe so a typo cannot become Python code.
@@ -263,7 +266,6 @@ else:
     ]
 cmds += [
     "python -m pip install --disable-pip-version-check -q -r /content/lexi-research/${REQUIREMENTS_FILE}",
-    "python -m pip install --disable-pip-version-check -q pydantic jinja2 openai httpx fastapi uvicorn",
     # Colab's base image ships torchao 0.10.0. PEFT's dispatcher calls
     # is_torchao_available, which *raises* ImportError below its 0.16 minimum
     # instead of returning False, so loading an adapter back walks the full
