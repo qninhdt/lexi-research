@@ -223,9 +223,24 @@ def start(
         init_kwargs["id"] = run_id
         init_kwargs["resume"] = "allow"
 
-    handle = wandb.init(**init_kwargs)
+    try:
+        handle = wandb.init(**init_kwargs)
+    except Exception as err:
+        # Auto-recover if the run ID was previously deleted on the W&B server
+        if run_id and output_dir and ("deleted" in str(err).lower() or "previously created" in str(err).lower()):
+            fresh_id = wandb.util.generate_id()
+            init_kwargs["id"] = fresh_id
+            try:
+                (Path(output_dir) / "wandb_id.txt").write_text(fresh_id)
+            except Exception:  # noqa: BLE001
+                pass
+            handle = wandb.init(**init_kwargs)
+        else:
+            raise
+
     _setup_metric_axes(handle)
     return Run(stage=stage, mode=mode, lineage=lineage, _run=handle)
+
 
 
 __all__ = ["MODES", "Run", "TrackingError", "resolve_mode", "start"]
