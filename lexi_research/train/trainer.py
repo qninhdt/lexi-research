@@ -552,7 +552,6 @@ def train_sft(
         use_liger_kernel=config.get_bool("train.use_liger_kernel"),
         remove_unused_columns=False,
         tf32=tf32,
-        group_by_length=config.get_bool("train.group_by_length"),
         dataloader_num_workers=dataloader_workers,
 
         dataloader_pin_memory=config.get_bool("train.dataloader_pin_memory"),
