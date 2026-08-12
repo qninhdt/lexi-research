@@ -26,9 +26,11 @@ dist/
 # private (redistribution rights unverified).
 data/*
 !data/*.py
-*.parquet
+!data/gec/
+!data/gec/*
 *.sqlite
 *.db
+
 
 # The DVC cache holds the content of every tracked artifact, so committing it
 # commits the data itself. W&I+LOCNESS is licensed for non-commercial research
