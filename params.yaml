@@ -181,8 +181,9 @@ train:
   # Rows scored in loop. Fixed and small, and fixed across arms — an ablation
   # whose arms were scored on different rows is not an ablation.
   eval_subset: 32
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   # Non-reentrant checkpointing is lower-overhead on current PyTorch, but keep
+
   # the switch explicit so a timing ablation can reject it if backward is slower.
   gradient_checkpointing_use_reentrant: false
   # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
