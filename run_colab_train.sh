@@ -384,12 +384,9 @@ cmd = [
     "--resume", "${RESUME}",
 ]
 
-for pair in "${EXTRA_OVERRIDES}".split():
-    cmd += ["--override", pair]
-
+# L4 defaults — placed before EXTRA_OVERRIDES so the user can override them
+# (the last --override for a given key wins).
 if "${GPU_KEY}" == "L4":
-    # L4 fits this 4B hybrid model with recomputation; without it, the
-    # roughly 1.5k-token smoke examples exhaust the 22 GiB device.
     cmd += [
         "--override", "train.gradient_checkpointing=true",
         "--override", "train.tf32=true",
@@ -398,6 +395,9 @@ if "${GPU_KEY}" == "L4":
         "--override", "train.dataloader_persistent_workers=true",
         "--override", "train.dataloader_prefetch_factor=2",
     ]
+
+for pair in "${EXTRA_OVERRIDES}".split():
+    cmd += ["--override", pair]
 
 print(f">>> {' '.join(cmd)}", flush=True)
 result = subprocess.run(cmd)
