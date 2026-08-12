@@ -135,4 +135,78 @@ def build_eval_callback(
     return InLoopEval()
 
 
-__all__ = ["build_eval_callback", "latest_checkpoint", "resolve_resume"]
+def build_progress_callback() -> Any:
+
+    """A beautiful, rich progress and step callback for training logs."""
+    import time
+    import torch
+    import transformers
+
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+
+        HAS_RICH = True
+    except ImportError:
+        HAS_RICH = False
+
+    class PrettyProgressCallback(transformers.TrainerCallback):  # type: ignore[misc]
+        def __init__(self) -> None:
+            self.console = Console(force_terminal=True) if HAS_RICH else None
+            self.start_time: float | None = None
+
+        def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            self.start_time = time.perf_counter()
+            if HAS_RICH and self.console:
+                max_steps = state.max_steps if state.max_steps > 0 else "Epoch-based"
+                save_steps = getattr(args, "save_steps", "N/A")
+                log_steps = getattr(args, "logging_steps", "N/A")
+                self.console.print()
+                self.console.print(
+                    Panel(
+                        f"[bold cyan]🚀 Lexi SFT Training Pipeline Started[/bold cyan]\n"
+                        f"[dim]Total Steps:[/dim] [bold yellow]{max_steps}[/bold yellow] │ "
+                        f"[dim]Save Interval:[/dim] [bold green]{save_steps} steps[/bold green] │ "
+                        f"[dim]Logging Interval:[/dim] [bold magenta]{log_steps} step(s)[/bold magenta]",
+                        title="[bold white]Training Pipeline[/bold white]",
+                        border_style="cyan",
+                    )
+                )
+
+        def on_log(self, args: Any, state: Any, control: Any, logs: dict[str, Any] | None = None, **kwargs: Any) -> None:
+            if not logs or not HAS_RICH or not self.console:
+                return
+
+            step = int(state.global_step)
+            max_steps = int(state.max_steps) if state.max_steps and state.max_steps > 0 else 1
+            pct = min(100.0, (step / max_steps) * 100) if max_steps > 0 else 0.0
+
+            loss = logs.get("loss")
+            lr = logs.get("learning_rate")
+
+            loss_str = f"[bold green]{loss:.4f}[/bold green]" if loss is not None else "[dim]N/A[/dim]"
+            lr_str = f"[bold cyan]{lr:.2e}[/bold cyan]" if lr is not None else "[dim]N/A[/dim]"
+
+            vram_str = "[dim]N/A[/dim]"
+            if torch.cuda.is_available():
+                alloc_gb = torch.cuda.max_memory_allocated() / (1024**3)
+                total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                vram_str = f"[bold yellow]{alloc_gb:.1f} GB[/bold yellow] / [dim]{total_gb:.1f} GB[/dim]"
+
+            elapsed = time.perf_counter() - (self.start_time or time.perf_counter())
+            sps = step / elapsed if elapsed > 0.01 else 0.0
+
+            filled = int(pct // 5)
+            progress_bar = f"[{'█' * filled}{'░' * (20 - filled)}]"
+
+            self.console.print(
+                f"[bold magenta]Step {step:5d}/{max_steps}[/bold magenta] "
+                f"[cyan]{progress_bar}[/cyan] [bold white]{pct:5.1f}%[/bold white] │ "
+                f"Loss: {loss_str} │ LR: {lr_str} │ VRAM: {vram_str} │ Speed: [bold green]{sps:.2f} step/s[/bold green]"
+            )
+
+    return PrettyProgressCallback()
+
+
+__all__ = ["build_eval_callback", "build_progress_callback", "latest_checkpoint", "resolve_resume"]
+

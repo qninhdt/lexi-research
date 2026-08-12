@@ -21,7 +21,8 @@ from typing import Any
 
 from lexi_research.cli.config import Config
 
-from .callbacks import resolve_resume
+from .callbacks import build_progress_callback, resolve_resume
+
 from .collate import IGNORE_INDEX, Example, SequenceTooLong, build_example
 from .collate_corrector import build_corrector_example
 from .modules import Layout, TargetResolution, resolve_target_modules
@@ -595,8 +596,10 @@ def train_sft(
                 every_steps=config.get_int("train.eval_steps"),
             )
         )
+    trainer.add_callback(build_progress_callback())
 
     outcome = trainer.train(resume_from_checkpoint=resolve_resume(output_dir, resume))
+
     trainer.save_model(str(output_dir))
 
     return TrainResult(
