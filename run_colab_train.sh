@@ -273,6 +273,12 @@ cmds += [
     # bitsandbytes does the 4-bit work — so removing it is the fix rather than
     # upgrading into a version nothing was tested against.
     "python -m pip uninstall -y -q torchao || true",
+    # Qwen3.5's GatedDeltaNet layers need fused CUDA kernels; without them the
+    # model falls back to torch_chunk_gated_delta_rule which casts everything to
+    # FP32 and OOMs on L4.  --no-build-isolation compiles against the VM's own
+    # PyTorch/CUDA so the C++ ABI matches.
+    "python -m pip install --disable-pip-version-check -q --no-build-isolation causal-conv1d>=1.6.0",
+    "python -m pip install --disable-pip-version-check -q --no-build-isolation flash-linear-attention",
 ]
 for cmd in cmds:
     print(f"\n>>> {cmd}", flush=True)
