@@ -601,6 +601,11 @@ def train_sft(
 
     outcome = trainer.train(resume_from_checkpoint=resolve_resume(output_dir, resume))
 
+    if torch.cuda.is_available():
+        peak_vram_gb = torch.cuda.max_memory_allocated() / (1024**3)
+        total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"\n[VRAM Peak] Memory Allocated: {peak_vram_gb:.2f} GB / {total_vram_gb:.2f} GB", flush=True)
+
     trainer.save_model(str(output_dir))
 
     return TrainResult(
