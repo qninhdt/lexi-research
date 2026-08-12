@@ -265,7 +265,7 @@ else:
         f"https://github.com/qninhdt/lexi-research.git {repo}"
     ]
 cmds += [
-    "python -m pip install --disable-pip-version-check -q -r /content/lexi-research/${REQUIREMENTS_FILE}",
+    "cd /content/lexi-research && python -m pip install --disable-pip-version-check -q -r requirements-colab.txt",
     # Colab's base image ships torchao 0.10.0. PEFT's dispatcher calls
     # is_torchao_available, which *raises* ImportError below its 0.16 minimum
     # instead of returning False, so loading an adapter back walks the full
