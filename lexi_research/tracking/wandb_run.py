@@ -168,7 +168,14 @@ def resolve_mode(config: Any) -> str:
     return mode
 
 
-def start(config: Any, *, stage: str, lineage: Mapping[str, Any]) -> Run:
+def start(
+    config: Any,
+    *,
+    stage: str,
+    lineage: Mapping[str, Any],
+    output_dir: str | Path | None = None,
+    run_id: str | None = None,
+) -> Run:
     """Open a run for `stage`, or a handle that records nothing."""
     mode = resolve_mode(config)
     if mode == "disabled":
@@ -184,19 +191,43 @@ def start(config: Any, *, stage: str, lineage: Mapping[str, Any]) -> Run:
     tags = _build_tags(stage, lineage)
     notes = _build_notes(stage, lineage)
 
-    handle = wandb.init(
-        project=config.get_str("tracking.project"),
-        entity=config.get_str("tracking.entity") or None,
-        group=config.get_str("tracking.group") or None,
-        job_type=stage,
-        mode=mode,
-        tags=tags,
-        notes=notes,
-        config=dict(lineage),
-    )
+    # Persistent run_id for seamless W&B dashboard resuming across restarts
+    if not run_id and output_dir:
+        out_path = Path(output_dir)
+        id_file = out_path / "wandb_id.txt"
+        if id_file.exists():
+            try:
+                run_id = id_file.read_text().strip()
+            except Exception:  # noqa: BLE001
+                run_id = None
+        if not run_id:
+            run_id = wandb.util.generate_id()
+            try:
+                out_path.mkdir(parents=True, exist_ok=True)
+                id_file.write_text(run_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+    init_kwargs: dict[str, Any] = {
+        "project": config.get_str("tracking.project"),
+        "entity": config.get_str("tracking.entity") or None,
+        "group": config.get_str("tracking.group") or None,
+        "job_type": stage,
+        "mode": mode,
+        "tags": tags,
+        "notes": notes,
+        "config": dict(lineage),
+    }
+
+    if run_id:
+        init_kwargs["id"] = run_id
+        init_kwargs["resume"] = "allow"
+
+    handle = wandb.init(**init_kwargs)
     _setup_metric_axes(handle)
     return Run(stage=stage, mode=mode, lineage=lineage, _run=handle)
 
 
 __all__ = ["MODES", "Run", "TrackingError", "resolve_mode", "start"]
+
 

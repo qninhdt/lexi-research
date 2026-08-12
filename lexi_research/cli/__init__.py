@@ -246,7 +246,8 @@ def _train_once(
 
     run_config = config.with_overrides([f"tracking.group={group}"]) if group else config
     lineage = collect(run_config.as_dict(), stage=stage)
-    run = start(run_config, stage=stage, lineage=lineage)
+    run = start(run_config, stage=stage, lineage=lineage, output_dir=output_dir)
+
     try:
         result = train_sft(
             run_config,
@@ -325,7 +326,8 @@ def _handle_train_rl(config: Config, args: argparse.Namespace) -> int:
     run_config = config.with_overrides([f"rl.algo={args.algo}"]) if args.algo else config
     stage = f"rl-{run_config.get_str('rl.algo')}"
     lineage = collect(run_config.as_dict(), stage=stage)
-    run = start(run_config, stage=stage, lineage=lineage)
+    run = start(run_config, stage=stage, lineage=lineage, output_dir=args.output)
+
     try:
         result = train_rl(
             run_config,
