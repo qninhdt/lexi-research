@@ -321,6 +321,16 @@ async def label_texts(
     limit = asyncio.Semaphore(concurrency or client.config.concurrency)
     write_lock = asyncio.Lock()
 
+    from tqdm import tqdm
+
+    pbar = tqdm(
+        total=len(rows),
+        initial=stats.cached,
+        desc="Call 2: Grading sentences",
+        unit="text",
+        disable=not pending,
+    )
+
     async def run(row: dict[str, Any]) -> None:
         async with limit:
             output = await grade_one(row, client, pass_index=pass_index)
@@ -339,8 +349,22 @@ async def label_texts(
             )
             if label is not None:
                 store.append(label)
+                pbar.update(1)
 
-    await asyncio.gather(*(run(row) for row in pending))
+    try:
+        await asyncio.gather(*(run(row) for row in pending))
+    finally:
+        pbar.close()
+
+    if stats.failed > 0 or stats.rejected > 0:
+        import sys
+
+        print(
+            f"\n⚠️ Notice: {stats.failed} requests failed (upstream errors) and "
+            f"{stats.rejected} rejected. Saved {stats.labelled} valid labels.",
+            file=sys.stderr,
+        )
+
     return stats
 
 

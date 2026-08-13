@@ -26,6 +26,7 @@ import random
 from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, runtime_checkable
 
+from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
 from .cache import ResponseCache, cache_key
@@ -155,8 +156,45 @@ def _tool_payload(message: Any) -> dict[str, Any] | None:
     if arguments is None or arguments == "":
         return {}
     if isinstance(arguments, str):
-        arguments = json.loads(arguments)
+        try:
+            arguments = json.loads(arguments)
+        except Exception:
+            arguments = repair_json(arguments, return_objects=True)
     return arguments if isinstance(arguments, dict) else {}
+
+
+def _extract_raw_content(message: Any) -> str | None:
+    """Extract raw text content from a message (str, list of content blocks, or dict)."""
+    if message is None:
+        return None
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                parts.append(str(part["text"]))
+        return "\n".join(parts) if parts else None
+    return None
+
+
+def _repair_json_payload(raw: Any, schema: type[_T]) -> _T | None:
+    """Attempt to repair malformed JSON string from raw LLM message content using json_repair."""
+    content = _extract_raw_content(raw)
+    if not content or not content.strip():
+        return None
+    try:
+        repaired = repair_json(content, return_objects=True)
+        if isinstance(repaired, (dict, list)):
+            return schema.model_validate(repaired)
+    except Exception:
+        pass
+    return None
 
 
 class LangChainStructuredLLM:
@@ -167,7 +205,7 @@ class LangChainStructuredLLM:
     * `json_schema` — provider-native strict structured output.
     * `function_calling` — the schema as one forced tool.
     * `json_mode` — a JSON object in the normal text channel, parsed into the
-      Pydantic schema by LangChain.
+      Pydantic schema by LangChain (with `json_repair` fallback).
 
     Usage is exposed through `last_usage` because the caller needs the token
     counts for accounting, and threading them through the `parse` return type
@@ -220,12 +258,20 @@ class LangChainStructuredLLM:
                             "the answer was lost in transport"
                         )
                     return schema.model_validate(_unwrap_arguments(payload, schema))
+            elif self._config.method == "json_mode":
+                repaired = _repair_json_payload(raw, schema)
+                if repaired is not None:
+                    return repaired
             if isinstance(parsing_error, Exception):
                 raise parsing_error
             raise ValueError(str(parsing_error))
 
         parsed = result.get("parsed")
         if parsed is None:
+            if self._config.method == "json_mode":
+                repaired = _repair_json_payload(raw, schema)
+                if repaired is not None:
+                    return repaired
             raise ValueError("model returned no parsed structured output")
         if isinstance(parsed, schema):
             return parsed

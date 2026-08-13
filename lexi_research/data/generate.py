@@ -178,97 +178,114 @@ async def generate_batches(
     limit = asyncio.Semaphore(concurrency or client.config.concurrency)
     write_lock = asyncio.Lock()
 
+    from tqdm import tqdm
+
+    pbar = tqdm(
+        total=len(batches),
+        initial=stats.batches_cached,
+        desc="Call 1: Generating sentences",
+        unit="batch",
+        disable=not pending,
+    )
+
     async def run(batch: Batch) -> None:
-        messages = render_diversify_prompt(
-            batch.sense.target,
-            _sense_ref(batch),
-            batch.specs,
-            {
-                spec.profile_id: traits.get(spec.profile_id, _UNKNOWN_PROFILE)
-                for spec in batch.specs
-            },
-        )
-        async with limit:
-            try:
-                result = await client.call(
-                    messages, DiversifyBatch, cache_extra=_cache_identity(batch)
-                )
-            except RetryExhausted:
-                stats.batches_failed += 1
-                return
-
-        returned_ids = [sentence.spec_id for sentence in result.sentences]
-        expected_ids = {spec.spec_id for spec in batch.specs}
-        if len(returned_ids) != len(set(returned_ids)):
-            stats.batches_failed += 1
-            stats.reject("duplicate_spec_id")
-            client.invalidate(messages, cache_extra=_cache_identity(batch))
-            return
-        if set(returned_ids) - expected_ids:
-            stats.batches_failed += 1
-            stats.reject("unexpected_spec_id")
-            client.invalidate(messages, cache_extra=_cache_identity(batch))
-            return
-        if set(returned_ids) != expected_ids:
-            # Keep the batch pending. A later resume may obtain the missing rows;
-            # recording `batch_done` here would silently make them permanent.
-            stats.batches_failed += 1
-            for _ in expected_ids - set(returned_ids):
-                stats.reject("missing_spec_id")
-            client.invalidate(messages, cache_extra=_cache_identity(batch))
-            return
-        by_spec = {sentence.spec_id: sentence.text for sentence in result.sentences}
-        accepted: list[dict[str, Any]] = []
-
-        for spec in batch.specs:
-            text = by_spec.get(spec.spec_id)
-            assert text is not None
-            reason = validate_text(text)
-            if reason is not None:
-                stats.reject(reason)
-                continue
-            expects_target = spec.error_spec != "unreadable" and spec.meaning_req > 0
-            if expects_target and not target_is_present(text, batch.sense.target):
-                stats.reject("target_absent")
-                continue
-            accepted.append(
+        try:
+            messages = render_diversify_prompt(
+                batch.sense.target,
+                _sense_ref(batch),
+                batch.specs,
                 {
-                    "req_uid": spec.spec_id,
-                    "batch_uid": batch.batch_uid,
-                    "spec_id": spec.spec_id,
-                    "sense_uid": batch.sense.sense_uid,
-                    "target": batch.sense.target,
-                    "target_norm": batch.sense.target_norm,
-                    "pos": batch.sense.pos,
-                    "definition": batch.sense.definition,
-                    "cefr": batch.sense.cefr,
-                    "is_multiword": batch.sense.is_multiword,
-                    "is_placeholder": batch.sense.is_placeholder,
-                    "profile_id": spec.profile_id,
-                    "meaning_req": spec.meaning_req,
-                    "error_spec": spec.error_spec,
-                    "text": text.strip(),
-                }
+                    spec.profile_id: traits.get(spec.profile_id, _UNKNOWN_PROFILE)
+                    for spec in batch.specs
+                },
+            )
+            async with limit:
+                try:
+                    result = await client.call(
+                        messages, DiversifyBatch, cache_extra=_cache_identity(batch)
+                    )
+                except RetryExhausted:
+                    stats.batches_failed += 1
+                    return
+
+            returned_ids = [sentence.spec_id for sentence in result.sentences]
+            expected_ids = {spec.spec_id for spec in batch.specs}
+            if len(returned_ids) != len(set(returned_ids)):
+                stats.batches_failed += 1
+                stats.reject("duplicate_spec_id")
+                client.invalidate(messages, cache_extra=_cache_identity(batch))
+                return
+            if set(returned_ids) - expected_ids:
+                stats.batches_failed += 1
+                stats.reject("unexpected_spec_id")
+                client.invalidate(messages, cache_extra=_cache_identity(batch))
+                return
+            if set(returned_ids) != expected_ids:
+                # Keep the batch pending. A later resume may obtain the missing rows;
+                # recording `batch_done` here would silently make them permanent.
+                stats.batches_failed += 1
+                for _ in expected_ids - set(returned_ids):
+                    stats.reject("missing_spec_id")
+                client.invalidate(messages, cache_extra=_cache_identity(batch))
+                return
+            by_spec = {sentence.spec_id: sentence.text for sentence in result.sentences}
+            accepted: list[dict[str, Any]] = []
+
+            for spec in batch.specs:
+                text = by_spec.get(spec.spec_id)
+                assert text is not None
+                reason = validate_text(text)
+                if reason is not None:
+                    stats.reject(reason)
+                    continue
+                expects_target = spec.error_spec != "unreadable" and spec.meaning_req > 0
+                if expects_target and not target_is_present(text, batch.sense.target):
+                    stats.reject("target_absent")
+                    continue
+                accepted.append(
+                    {
+                        "req_uid": spec.spec_id,
+                        "batch_uid": batch.batch_uid,
+                        "spec_id": spec.spec_id,
+                        "sense_uid": batch.sense.sense_uid,
+                        "target": batch.sense.target,
+                        "target_norm": batch.sense.target_norm,
+                        "pos": batch.sense.pos,
+                        "definition": batch.sense.definition,
+                        "cefr": batch.sense.cefr,
+                        "is_multiword": batch.sense.is_multiword,
+                        "is_placeholder": batch.sense.is_placeholder,
+                        "profile_id": spec.profile_id,
+                        "meaning_req": spec.meaning_req,
+                        "error_spec": spec.error_spec,
+                        "text": text.strip(),
+                    }
+                )
+
+            measure = batch_diversity(
+                batch.batch_uid, [row["text"] for row in accepted], threshold=min_distinct2
             )
 
-        measure = batch_diversity(
-            batch.batch_uid, [row["text"] for row in accepted], threshold=min_distinct2
-        )
+            async with write_lock:
+                for row in accepted:
+                    store.append(row)
+                # The batch marker is written last: its presence means every sentence
+                # of the batch is already durable, so a crash between the two leaves a
+                # batch that is re-run rather than one silently recorded as complete.
+                store.append({"req_uid": batch.batch_uid, "kind": "batch_done"})
+                stats.batches += 1
+                stats.texts += len(accepted)
+                stats.diversity.append(measure)
+                if measure.is_collapsed:
+                    stats.low_diversity_batches += 1
+        finally:
+            pbar.update(1)
 
-        async with write_lock:
-            for row in accepted:
-                store.append(row)
-            # The batch marker is written last: its presence means every sentence
-            # of the batch is already durable, so a crash between the two leaves a
-            # batch that is re-run rather than one silently recorded as complete.
-            store.append({"req_uid": batch.batch_uid, "kind": "batch_done"})
-            stats.batches += 1
-            stats.texts += len(accepted)
-            stats.diversity.append(measure)
-            if measure.is_collapsed:
-                stats.low_diversity_batches += 1
+    try:
+        await asyncio.gather(*(run(batch) for batch in pending))
+    finally:
+        pbar.close()
 
-    await asyncio.gather(*(run(batch) for batch in pending))
     return stats
 
 

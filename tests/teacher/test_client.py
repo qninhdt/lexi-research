@@ -104,6 +104,77 @@ async def test_langchain_adapter_recovers_wrapped_tool_arguments(monkeypatch, co
     assert client.last_usage == (12, 8)
 
 
+async def test_langchain_adapter_recovers_malformed_json_mode_output(monkeypatch, config) -> None:
+    class FakeChain:
+        async def ainvoke(self, messages):
+            del messages
+            # Malformed JSON: trailing comma and missing closing brace
+            broken_text = '{"correction": "I like it.", "meaning": 4, "feedback": "Good.",'
+            return {
+                "raw": SimpleNamespace(
+                    content=broken_text,
+                    usage_metadata={"input_tokens": 10, "output_tokens": 15},
+                    response_metadata={},
+                ),
+                "parsed": None,
+                "parsing_error": ValueError("Invalid JSON"),
+            }
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def with_structured_output(self, schema, **kwargs):
+            del schema, kwargs
+            return FakeChain()
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=FakeChatOpenAI))
+
+    client = LangChainStructuredLLM(replace(config, method="json_mode"))
+    result = await client.parse(MESSAGES, GraderOutput)
+
+    assert result.meaning == 4
+    assert result.correction == "I like it."
+    assert result.feedback == "Good."
+    assert client.last_usage == (10, 15)
+
+
+async def test_langchain_adapter_recovers_malformed_tool_args(
+    monkeypatch, config
+) -> None:
+    class FakeChain:
+        async def ainvoke(self, messages):
+            del messages
+            # Tool call args as a broken JSON string
+            broken_str = '{"correction": "I like it.", "meaning": 4, "feedback": "Good.",}'
+            return {
+                "raw": SimpleNamespace(
+                    usage_metadata={"input_tokens": 12, "output_tokens": 8},
+                    response_metadata={},
+                    tool_calls=[{"args": broken_str}],
+                ),
+                "parsed": None,
+                "parsing_error": ValueError("JSON decode error"),
+            }
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def with_structured_output(self, schema, **kwargs):
+            del schema, kwargs
+            return FakeChain()
+
+    monkeypatch.setitem(sys.modules, "langchain_openai", SimpleNamespace(ChatOpenAI=FakeChatOpenAI))
+
+    client = LangChainStructuredLLM(replace(config, method="function_calling"))
+    result = await client.parse(MESSAGES, GraderOutput)
+
+    assert result.meaning == 4
+    assert result.correction == "I like it."
+    assert client.last_usage == (12, 8)
+
+
 async def test_call_returns_parsed_schema(client_factory, config) -> None:
     client = client_factory(FakeLLM(PAYLOAD))
     result = await client.call(MESSAGES, GraderOutput)
