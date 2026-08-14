@@ -253,17 +253,13 @@ def load_model_and_tokenizer(
         if removed:
             print(f"text-only load — removed {', '.join(removed)}", flush=True)
 
-    for cfg in [
-        getattr(model, "config", None),
-        getattr(getattr(model, "base_model", None), "config", None),
-    ]:
-        if cfg is not None:
-            if hasattr(cfg, "use_return_dict"):
-                try:
-                    delattr(cfg, "use_return_dict")
-                except Exception:
-                    pass
-            cfg.return_dict = True
+    import logging
+    import warnings
+
+    warnings.filterwarnings("ignore", message=r".*use_return_dict.*")
+    logging.getLogger("transformers.configuration_utils").addFilter(
+        lambda record: "use_return_dict" not in record.getMessage()
+    )
 
     return model, tokenizer
 
