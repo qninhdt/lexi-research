@@ -203,6 +203,9 @@ def build_correction_eval_callback(
                 use_cuda_autocast = torch.cuda.is_available() and device.type == "cuda"
                 amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
                 configured_eval_bs = (
                     config.get_int("train.eval_batch_size")
                     if "eval_batch_size" in config.section("train")
@@ -212,7 +215,8 @@ def build_correction_eval_callback(
                 if val_examples:
                     from lexi_research.train.trainer import collate_batch
 
-                    loss_batch_size = configured_eval_bs
+                    # Use a lightweight micro-batch for full-sequence loss to prevent logits VRAM spike (vocab=152k)
+                    loss_batch_size = min(configured_eval_bs, 8 if torch.cuda.is_available() else 4)
                     total_loss = 0.0
                     total_items = 0
                     pad_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
@@ -234,6 +238,8 @@ def build_correction_eval_callback(
                                 total_items += len(chunk)
                     if total_items > 0:
                         val_loss = total_loss / total_items
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
                 # 2. Compute Generation Predictions
                 all_prompts: list[str] = []
@@ -357,6 +363,8 @@ def build_correction_eval_callback(
                     )
                 return val_metrics
             finally:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 if was_training:
                     model.train()
 
