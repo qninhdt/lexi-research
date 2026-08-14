@@ -297,19 +297,24 @@ def build_correction_eval_callback(
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
-                # Log qualitative samples with inline visual diff to W&B (exactly 8 samples)
+                # Log qualitative samples with inline visual diff to W&B (8 samples that required correction in GT)
                 from lexi_research.tracking.panels import log_correction_samples
 
-                sample_records = [
+                all_records = [
                     {
-                        "input": row.get("input") or row.get("text") or "",
+                        "input": str(row.get("input") or row.get("text") or "").strip(),
                         "prediction": p,
                         "gold": g,
                         "exact": p == g,
                     }
                     for row, p, g in zip(eval_subset, predictions, references)
                 ]
-                log_correction_samples(run, sample_records, step=step, limit=8)
+                # Filter strictly for samples where ground truth required an edit (input != gold)
+                edited_records = [
+                    r for r in all_records if r["input"] != r["gold"]
+                ]
+                display_records = edited_records if edited_records else all_records
+                log_correction_samples(run, display_records, step=step, limit=8)
 
                 loss_header = f"Loss: {val_loss:.4f} │ " if val_loss is not None else ""
                 print(
@@ -320,8 +325,8 @@ def build_correction_eval_callback(
                     f"Span F1: {metrics['correction.span_only_f1']:.1%}",
                     flush=True,
                 )
-                for idx in range(min(3, len(sample_records))):
-                    sample = sample_records[idx]
+                for idx in range(min(3, len(display_records))):
+                    sample = display_records[idx]
                     status = "✓ EXACT" if sample["exact"] else "✗ DIFF"
                     print(
                         f"  [{status}] In:   {sample['input']}\n"
