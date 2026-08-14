@@ -82,6 +82,82 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
     return rows
 
 
+def compute_inline_diff(pred: str | None, gold: str | None) -> str:
+    """Generate a clean, readable inline diff comparing prediction against gold."""
+    if pred is None or gold is None:
+        return "N/A"
+    p_str = pred.strip()
+    g_str = gold.strip()
+    if not p_str and not g_str:
+        return "✓ EXACT MATCH"
+    if p_str == g_str:
+        return "✓ EXACT MATCH"
+
+    import difflib
+
+    p_words = p_str.split()
+    g_words = g_str.split()
+    matcher = difflib.SequenceMatcher(None, g_words, p_words)
+    diff_parts = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            diff_parts.append(" ".join(g_words[i1:i2]))
+        elif tag == "replace":
+            del_text = " ".join(g_words[i1:i2])
+            ins_text = " ".join(p_words[j1:j2])
+            diff_parts.append(f"[-{del_text}-]{{+{ins_text}+}}")
+        elif tag == "delete":
+            del_text = " ".join(g_words[i1:i2])
+            diff_parts.append(f"[-{del_text}-]")
+        elif tag == "insert":
+            ins_text = " ".join(p_words[j1:j2])
+            diff_parts.append(f"{{+{ins_text}+}}")
+    return " ".join(diff_parts)
+
+
+CORRECTION_SAMPLE_COLUMNS = (
+    "step",
+    "input",
+    "predicted_correction",
+    "gold_correction",
+    "inline_diff",
+    "exact_match",
+    "similarity",
+)
+
+
+def log_correction_samples(
+    run: Any,
+    samples: Sequence[Mapping[str, Any]],
+    *,
+    step: int | None = None,
+    limit: int = 50,
+) -> None:
+    """Publish qualitative GEC samples with inline diffs to W&B."""
+    if not getattr(run, "active", False):
+        return
+    import wandb
+
+    rows = []
+    for s in samples[:limit]:
+        pred = str(s.get("prediction", "") or "")
+        gold = str(s.get("gold", "") or "")
+        diff = s.get("diff") or compute_inline_diff(pred, gold)
+        rows.append(
+            [
+                step if step is not None else s.get("step", 0),
+                s.get("input", ""),
+                pred,
+                gold,
+                diff,
+                bool(s.get("exact", pred == gold)),
+                float(s.get("similarity", 0.0)),
+            ]
+        )
+    table = wandb.Table(columns=list(CORRECTION_SAMPLE_COLUMNS), data=rows)
+    run.log({"val/samples": table}, step=step)
+
+
 def log_qualitative(
     run: Any, predictions: Sequence[Mapping[str, Any]], *, limit: int = 200
 ) -> None:

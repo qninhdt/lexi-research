@@ -208,6 +208,20 @@ def build_correction_eval_callback(
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
+                # Log qualitative samples with inline visual diff to W&B
+                from lexi_research.tracking.panels import log_correction_samples
+
+                sample_records = [
+                    {
+                        "input": row.get("input") or row.get("text") or "",
+                        "prediction": p,
+                        "gold": g,
+                        "exact": p == g,
+                    }
+                    for row, p, g in zip(eval_subset, predictions, references)
+                ]
+                log_correction_samples(run, sample_records, step=step)
+
                 print(
                     f"\n[Correction Eval @ Step {step}] Exact Match: {metrics['correction.exact_match']:.1%} │ "
                     f"Char Sim: {metrics['correction.char_similarity']:.1%} │ "
