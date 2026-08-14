@@ -152,9 +152,9 @@ train:
   seed: 20260729
   logging_steps: 10
   save_steps: 100
-  # FlashAttention-2 uses Tri Dao's fused kernels for full-attention blocks,
-  # supporting varlen unpadding/padding-free. Linear blocks use flash-linear-attention.
-  attn_implementation: flash_attention_2
+  # Native PyTorch SDPA uses the L4/A100 FlashAttention-2 kernels without
+  # requiring external C++ compilation. Linear blocks use flash-linear-attention.
+  attn_implementation: sdpa
   # `auto` selects fused AdamW on CUDA and the portable implementation on CPU.
   # This changes kernel fusion only; the optimizer update and hyperparameters
   # remain the same.
