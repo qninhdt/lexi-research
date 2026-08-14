@@ -125,10 +125,14 @@ train:
   # meaning agreement drops against a rank 32 arm on the real corpus, rank is
   # the first thing to put back. Ablation A6 varies `target_modules`, and this
   # value belongs to the same family of questions.
-  lora_r: 8
-  lora_alpha: 32
+  lora_r: 32
+  lora_alpha: 64
   lora_dropout: 0.05
   learning_rate: 1.0e-4
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  weight_decay: 0.01
+  max_grad_norm: 1.0
   epochs: 2
   # Effective batch is the product of these two, and is what the learning rate
   # was chosen against; change one and the other must absorb it.
@@ -148,17 +152,14 @@ train:
   # measurably less wall-clock. Raise this only for a model verified to fit.
   per_device_batch_size: 8
   grad_accum: 1
-  warmup_ratio: 0.03
   seed: 20260729
   logging_steps: 10
   save_steps: 100
   # Native PyTorch SDPA uses the L4/A100 FlashAttention-2 kernels without
   # requiring external C++ compilation. Linear blocks use flash-linear-attention.
   attn_implementation: sdpa
-  # `auto` selects fused AdamW on CUDA and the portable implementation on CPU.
-  # This changes kernel fusion only; the optimizer update and hyperparameters
-  # remain the same.
-  optimizer: auto
+  # Fused AdamW on CUDA and portable implementation on CPU.
+  optimizer: adamw_torch_fused
   # Disabled by default: this is an optional A/B because Inductor compilation
   # can cost substantial startup time and VRAM on QLoRA + checkpointing.
   torch_compile: false
@@ -199,9 +200,23 @@ train:
   dataloader_pin_memory: true
   dataloader_persistent_workers: false
   dataloader_prefetch_factor: 2
-  # `attn` | `attn+mlp` | `all-linear`, or an explicit list of module-name
-  # patterns for a stack the layout below misreads. Ablation A6's arms.
-  target_modules: all-linear
+  # Linear module targets for LoRA adaptation across Full Attention, Gated DeltaNet, and MLP
+  target_modules:
+    # full attention
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # Gated DeltaNet
+    - in_proj_qkv
+    - in_proj_z
+    - in_proj_b
+    - in_proj_a
+    - out_proj
+    # MLP
+    - gate_proj
+    - up_proj
+    - down_proj
   # Loss over the answer only. False supervises the prompt too — ablation A7,
   # and the behaviour of the trainer this one replaced.
   completion_only: true

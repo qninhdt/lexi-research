@@ -514,6 +514,15 @@ def train_sft(
         gradient_accumulation_steps=config.get_int("train.grad_accum"),
         learning_rate=config.get_float("train.learning_rate"),
         warmup_ratio=config.get_float("train.warmup_ratio"),
+        lr_scheduler_type=config.get_str("train.lr_scheduler_type")
+        if "lr_scheduler_type" in config.section("train")
+        else "cosine",
+        weight_decay=config.get_float("train.weight_decay")
+        if "weight_decay" in config.section("train")
+        else 0.01,
+        max_grad_norm=config.get_float("train.max_grad_norm")
+        if "max_grad_norm" in config.section("train")
+        else 1.0,
         logging_steps=config.get_int("train.logging_steps"),
         save_steps=config.get_int("train.save_steps"),
         gradient_checkpointing=config.get_bool("train.gradient_checkpointing"),

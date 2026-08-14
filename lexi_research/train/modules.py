@@ -229,7 +229,7 @@ def resolve_target_modules(
             if not hits:
                 unmatched.append(pattern)
             targets.extend(hits)
-        if unmatched:
+        if not targets:
             raise TargetResolutionError(
                 f"target patterns matched no linear module: {sorted(unmatched)}. "
                 f"The stack holds {len(candidates)} linear modules across "

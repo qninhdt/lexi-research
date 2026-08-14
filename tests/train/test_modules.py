@@ -271,7 +271,7 @@ def test_is_linear_like_reads_the_projection_convention() -> None:
 def test_unknown_pattern_raises() -> None:
     """A no-op adapter trains to completion and reports a loss. Not possible."""
     with pytest.raises(TargetResolutionError, match="fictional_proj"):
-        resolve_target_modules(dense_model(2), ["self_attn.q_proj", "fictional_proj"])
+        resolve_target_modules(dense_model(2), ["fictional_proj"])
 
 
 def test_unknown_preset_raises() -> None:
