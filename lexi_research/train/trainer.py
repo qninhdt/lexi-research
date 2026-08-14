@@ -440,6 +440,22 @@ def train_sft(
         f"{supervised / total:.1%} of tokens supervised",
         flush=True,
     )
+    val_examples: list[Example] = []
+    if val_rows:
+        val_examples, val_dropped = build_examples(
+            tokenizer,
+            val_rows,
+            max_seq_len=config.get_int("train.max_seq_len"),
+            thinking=config.get_str("train.thinking"),
+            completion_only=config.get_bool("train.completion_only"),
+            task=config.get_str("train.task"),
+            max_drop_fraction=1.0,
+        )
+        print(
+            f"val examples — {len(val_examples)} built, {val_dropped} dropped",
+            flush=True,
+        )
+
     targets, model = attach_adapter(model, config)
     print(f"LoRA targets — {targets.summary()}", flush=True)
     # KV caches are useful for generation but waste memory and can conflict
@@ -454,11 +470,15 @@ def train_sft(
         optimizer = "adamw_torch_fused" if torch.cuda.is_available() else "adamw_torch"
     dataloader_workers = config.get_int("train.dataloader_num_workers")
     dataloader_prefetch = config.get_int("train.dataloader_prefetch_factor")
+    eval_steps = config.get_int("train.eval_steps")
     arguments = transformers.TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=config.get_int("train.epochs"),
         max_steps=max_steps if max_steps > 0 else -1,
         per_device_train_batch_size=config.get_int("train.per_device_batch_size"),
+        per_device_eval_batch_size=config.get_int("train.per_device_batch_size"),
+        eval_strategy="steps" if val_examples else "no",
+        eval_steps=eval_steps if val_examples else None,
         gradient_accumulation_steps=config.get_int("train.grad_accum"),
         learning_rate=config.get_float("train.learning_rate"),
         warmup_ratio=config.get_float("train.warmup_ratio"),
@@ -476,7 +496,6 @@ def train_sft(
         remove_unused_columns=False,
         tf32=tf32,
         dataloader_num_workers=dataloader_workers,
-
         dataloader_pin_memory=config.get_bool("train.dataloader_pin_memory"),
         dataloader_persistent_workers=(
             config.get_bool("train.dataloader_persistent_workers") and dataloader_workers > 0
@@ -495,18 +514,11 @@ def train_sft(
         model=model,
         args=arguments,
         train_dataset=_ExampleDataset(examples),
+        eval_dataset=_ExampleDataset(val_examples) if val_examples else None,
         data_collator=lambda batch: collate_batch(batch, pad_token_id),
     )
-    if val_rows:
+    if val_rows and config.get_str("train.task") == "grader":
         from .callbacks import build_eval_callback
-
-        if config.get_str("train.task") != "grader":
-            raise TrainerSetupError(
-                "in-loop evaluation decodes through the grader prompt and scores a "
-                "three-field answer, so it cannot read stage-A rows. Run stage A "
-                "without --val, and measure the adapter with `lexi eval` after "
-                "stage B has trained the fields the harness reports."
-            )
 
         trainer.add_callback(
             build_eval_callback(
@@ -516,7 +528,7 @@ def train_sft(
                 rows=val_rows,
                 band_config=band_config,
                 ceiling=ceiling or {},
-                every_steps=config.get_int("train.eval_steps"),
+                every_steps=eval_steps,
             )
         )
     trainer.add_callback(build_progress_callback())
