@@ -83,7 +83,7 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
 
 
 def compute_html_diff(pred: str | None, gold: str | None) -> str:
-    """Generate a clean, intuitive 2-line HTML diff: PRED (Red errors) vs GOLD (Green truth)."""
+    """Generate a clean single-line prediction with Green matching tags and Red errors."""
     if pred is None or gold is None:
         return "<span>N/A</span>"
     p_str = pred.strip()
@@ -113,11 +113,9 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
 
     matcher = difflib.SequenceMatcher(None, g_tokens, p_tokens)
 
-    pred_parts = []
-    gold_parts = []
+    rendered_parts: list[str] = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        g_chunk = "".join(g_tokens[i1:i2])
         p_chunk = "".join(p_tokens[j1:j2])
 
         if tag == "equal":
@@ -125,49 +123,30 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
             # If regular unchanged text, leave uncolored.
             for tok in p_tokens[j1:j2]:
                 if tok.startswith("[") and tok.endswith("]"):
-                    pred_parts.append(
-                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(tok)}</span>'
-                    )
-                    gold_parts.append(
+                    rendered_parts.append(
                         f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(tok)}</span>'
                     )
                 else:
-                    pred_parts.append(html.escape(tok))
-                    gold_parts.append(html.escape(tok))
-        elif tag == "replace":
-            # Mismatch: Pred generated wrong tag/text -> RED
-            # Gold expected target -> RED
-            pred_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
-            )
-            gold_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(g_chunk)}</span>'
+                    rendered_parts.append(html.escape(tok))
+        elif tag in ("replace", "insert"):
+            # Model generated a wrong tag, wrong replacement text, or extra tag -> RED
+            rendered_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
             )
         elif tag == "delete":
-            # Present in Gold, missing in Pred
-            gold_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(g_chunk)}</span>'
-            )
-        elif tag == "insert":
-            # Hallucinated / extra in Pred, not in Gold
-            pred_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
-            )
-
-    p_html = "".join(pred_parts)
-    g_html = "".join(gold_parts)
+            # Model missed a tag/edit from Gold
+            pass
 
     return (
-        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;line-height:1.6;">'
-        f'<div style="margin-bottom:6px;"><span style="background-color:#fee2e2;color:#991b1b;font-weight:800;padding:2px 6px;border-radius:3px;margin-right:6px;font-size:11px;">PRED</span>{p_html}</div>'
-        f'<div><span style="background-color:#dcfce7;color:#166534;font-weight:800;padding:2px 6px;border-radius:3px;margin-right:6px;font-size:11px;">GOLD</span>{g_html}</div>'
-        '</div>'
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
+        + "".join(rendered_parts)
+        + "</div>"
     )
 
 
 CORRECTION_SAMPLE_COLUMNS = (
     "Input",
-    "Evaluation Diff (Red: Model Pred Divergence | Green: Ground Truth Target)",
+    "Correction (Green: Tag Matched | Red: Error/Wrong Tag | Plain: Unchanged)",
 )
 
 
