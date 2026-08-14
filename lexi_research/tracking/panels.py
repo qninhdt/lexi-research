@@ -82,18 +82,21 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
     return rows
 
 
-def compute_inline_diff(pred: str | None, gold: str | None) -> str:
-    """Generate a clean, readable inline diff comparing prediction against gold."""
+def compute_html_diff(pred: str | None, gold: str | None) -> str:
+    """Generate an inline HTML diff with highlighted background colors for W&B."""
     if pred is None or gold is None:
-        return "N/A"
+        return "<span>N/A</span>"
     p_str = pred.strip()
     g_str = gold.strip()
     if not p_str and not g_str:
-        return "✓ EXACT MATCH"
+        return '<span style="color:#16a34a;font-weight:600;">✓ EXACT MATCH</span>'
     if p_str == g_str:
-        return "✓ EXACT MATCH"
+        import html
+
+        return f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:2px 6px;border-radius:4px;">✓ MATCH: {html.escape(p_str)}</span>'
 
     import difflib
+    import html
 
     p_words = p_str.split()
     g_words = g_str.split()
@@ -101,28 +104,34 @@ def compute_inline_diff(pred: str | None, gold: str | None) -> str:
     diff_parts = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            diff_parts.append(" ".join(g_words[i1:i2]))
+            diff_parts.append(html.escape(" ".join(g_words[i1:i2])))
         elif tag == "replace":
-            del_text = " ".join(g_words[i1:i2])
-            ins_text = " ".join(p_words[j1:j2])
-            diff_parts.append(f"[-{del_text}-]{{+{ins_text}+}}")
+            del_text = html.escape(" ".join(g_words[i1:i2]))
+            ins_text = html.escape(" ".join(p_words[j1:j2]))
+            diff_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{del_text}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 4px;border-radius:3px;margin:0 1px;">{ins_text}</span>'
+            )
         elif tag == "delete":
-            del_text = " ".join(g_words[i1:i2])
-            diff_parts.append(f"[-{del_text}-]")
+            del_text = html.escape(" ".join(g_words[i1:i2]))
+            diff_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{del_text}</span>'
+            )
         elif tag == "insert":
-            ins_text = " ".join(p_words[j1:j2])
-            diff_parts.append(f"{{+{ins_text}+}}")
-    return " ".join(diff_parts)
+            ins_text = html.escape(" ".join(p_words[j1:j2]))
+            diff_parts.append(
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 4px;border-radius:3px;margin:0 1px;">{ins_text}</span>'
+            )
+    return (
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
+        + " ".join(diff_parts)
+        + "</div>"
+    )
 
 
 CORRECTION_SAMPLE_COLUMNS = (
-    "step",
-    "input",
-    "predicted_correction",
-    "gold_correction",
-    "inline_diff",
-    "exact_match",
-    "similarity",
+    "Input",
+    "Correction Diff (Red: GT missing | Green: Pred)",
 )
 
 
@@ -133,27 +142,19 @@ def log_correction_samples(
     step: int | None = None,
     limit: int = 50,
 ) -> None:
-    """Publish qualitative GEC samples with inline diffs to W&B."""
+    """Publish qualitative GEC samples with inline HTML diffs to W&B (2 columns)."""
     if not getattr(run, "active", False):
         return
     import wandb
 
     rows = []
     for s in samples[:limit]:
+        raw_input = str(s.get("input", "") or "")
         pred = str(s.get("prediction", "") or "")
         gold = str(s.get("gold", "") or "")
-        diff = s.get("diff") or compute_inline_diff(pred, gold)
-        rows.append(
-            [
-                step if step is not None else s.get("step", 0),
-                s.get("input", ""),
-                pred,
-                gold,
-                diff,
-                bool(s.get("exact", pred == gold)),
-                float(s.get("similarity", 0.0)),
-            ]
-        )
+        html_diff = compute_html_diff(pred, gold)
+        rows.append([raw_input, wandb.Html(html_diff)])
+
     table = wandb.Table(columns=list(CORRECTION_SAMPLE_COLUMNS), data=rows)
     run.log({"val/samples": table}, step=step)
 
