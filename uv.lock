@@ -1716,6 +1716,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
+    { name = "json-repair" },
     { name = "liger-kernel" },
     { name = "pyarrow" },
     { name = "pydantic" },
@@ -1789,6 +1790,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'teacher'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "json-repair", specifier = ">=0.63.1" },
     { name = "json-repair", marker = "extra == 'teacher'", specifier = ">=0.63.1" },
     { name = "langchain-openai", marker = "extra == 'teacher'", specifier = ">=0.3" },
     { name = "liger-kernel", specifier = ">=0.8.1" },
