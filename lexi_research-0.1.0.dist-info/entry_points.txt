@@ -1,2 +1,0 @@
-[console_scripts]
-lexi = lexi_research.cli:main
