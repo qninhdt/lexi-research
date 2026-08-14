@@ -326,14 +326,27 @@ def _trainer_class(transformers: Any) -> Any:
     class LexiTrainer(transformers.Trainer):  # type: ignore[misc]
         def _get_train_sampler(self, train_dataset: Any = None) -> Any:
             if getattr(self.args, "train_sampling_strategy", None) == "group_by_length":
-                dataset = train_dataset if train_dataset is not None else self.train_dataset
+                dataset = (
+                    train_dataset
+                    if train_dataset is not None
+                    else self.train_dataset
+                )
                 lengths = [len(e.input_ids) for e in dataset]
                 return transformers.trainer_pt_utils.LengthGroupedSampler(
-                    self.args.train_batch_size * self.args.gradient_accumulation_steps,
+                    self.args.train_batch_size
+                    * self.args.gradient_accumulation_steps,
                     dataset=dataset,
                     lengths=lengths,
                 )
             return super()._get_train_sampler(train_dataset)
+
+        def _get_eval_sampler(self, eval_dataset: Any = None) -> Any:
+            from torch.utils.data import SequentialSampler
+
+            dataset = (
+                eval_dataset if eval_dataset is not None else self.eval_dataset
+            )
+            return SequentialSampler(dataset)
 
     return LexiTrainer
 
