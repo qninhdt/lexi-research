@@ -155,7 +155,8 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
 
 CORRECTION_SAMPLE_COLUMNS = (
     "Input",
-    "Correction (Green: Correct / Expected Target │ Red Strikethrough: Wrong Model Prediction)",
+    "Model Spans",
+    "Rendered Diff (Green: Correct / Expected │ Red Strikethrough: Wrong Model Prediction)",
 )
 
 
@@ -166,7 +167,7 @@ def log_correction_samples(
     step: int | None = None,
     limit: int = 50,
 ) -> None:
-    """Publish qualitative GEC samples with inline HTML diffs to W&B (2 columns)."""
+    """Publish qualitative GEC samples with raw span output and inline HTML diffs to W&B (3 columns)."""
     if not getattr(run, "active", False):
         return
     import wandb
@@ -176,8 +177,13 @@ def log_correction_samples(
         raw_input = str(s.get("input", "") or "")
         pred = str(s.get("prediction", "") or "")
         gold = str(s.get("gold", "") or "")
+        raw_spans = str(s.get("raw_spans", "") or "")
+        if not raw_spans and s.get("raw_prediction"):
+            raw_spans = str(s.get("raw_prediction"))
+
+        spans_text = raw_spans if raw_spans else (pred if pred in ("OK", "NULL") else "—")
         html_diff = compute_html_diff(pred, gold)
-        rows.append([raw_input, wandb.Html(html_diff)])
+        rows.append([raw_input, spans_text, wandb.Html(html_diff)])
 
     table = wandb.Table(columns=list(CORRECTION_SAMPLE_COLUMNS), data=rows)
     run.log({"val/samples": table}, step=step)

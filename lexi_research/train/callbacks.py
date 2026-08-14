@@ -386,6 +386,7 @@ def build_correction_eval_callback(
                 fixed_hardest_records = [
                     {
                         "input": raw_inputs[idx],
+                        "raw_spans": predictions[idx],
                         "prediction": rendered_predictions[idx],
                         "gold": references[idx],
                         "exact": rendered_predictions[idx] == references[idx],
