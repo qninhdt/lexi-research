@@ -203,10 +203,16 @@ def build_correction_eval_callback(
                 use_cuda_autocast = torch.cuda.is_available() and device.type == "cuda"
                 amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
+                configured_eval_bs = (
+                    config.get_int("train.eval_batch_size")
+                    if "eval_batch_size" in config.section("train")
+                    else (32 if torch.cuda.is_available() else 4)
+                )
+
                 if val_examples:
                     from lexi_research.train.trainer import collate_batch
 
-                    loss_batch_size = 32 if torch.cuda.is_available() else 4
+                    loss_batch_size = configured_eval_bs
                     total_loss = 0.0
                     total_items = 0
                     pad_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
@@ -260,7 +266,7 @@ def build_correction_eval_callback(
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
 
-                eval_batch_size = 32 if torch.cuda.is_available() else 8
+                eval_batch_size = configured_eval_bs
                 predictions: list[str] = []
                 from tqdm.auto import tqdm
 

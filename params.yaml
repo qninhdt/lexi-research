@@ -171,6 +171,8 @@ train:
   # In-loop evaluation interval. Loss falls smoothly while format validity
   # collapses, so the harness runs during training rather than after it. 0 is off.
   eval_steps: 100
+  # Batch size used during in-loop validation loss computation and generation.
+  eval_batch_size: 32
   # Rows scored in loop. 0 evaluates the entire validation set.
   eval_subset: 0
   gradient_checkpointing: false
