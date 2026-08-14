@@ -170,7 +170,7 @@ train:
   use_liger_kernel: true
   # In-loop evaluation interval. Loss falls smoothly while format validity
   # collapses, so the harness runs during training rather than after it. 0 is off.
-  eval_steps: 200
+  eval_steps: 100
   # Rows scored in loop. Fixed and small, and fixed across arms — an ablation
   # whose arms were scored on different rows is not an ablation.
   eval_subset: 32
