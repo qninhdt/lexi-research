@@ -18,7 +18,7 @@ dependencies = [
 gpu = [
     "accelerate>=1.0",
     "bitsandbytes>=0.45",
-    "causal-conv1d>=1.6.0",
+    "causal-conv1d @ https://github.com/astral-sh-build/build-causal-conv1d/releases/download/v1.6.2.post1-r2/causal_conv1d-1.6.2.post1%2Bcu.12.8.torch.2.11-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl ; python_version == '3.12' and sys_platform == 'linux'",
     "datasets>=3",
     "flash-linear-attention",
     "peft>=0.14",
