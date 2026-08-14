@@ -144,11 +144,11 @@ def build_correction_eval_callback(
     rows: Sequence[Mapping[str, Any]],
     every_steps: int,
 ) -> Any:
-    """A `TrainerCallback` that evaluates Stage 1 Grammar Correction on a validation subset."""
-    import difflib
+    """A `TrainerCallback` that evaluates Grammar Correction using unified correction metrics."""
     import torch
     import transformers
 
+    from lexi_research.eval.correction import evaluate_correction_pairs
     from lexi_research.train.collate import render_corrector_prompt
 
     class InLoopCorrectionEval(transformers.TrainerCallback):  # type: ignore[misc]
@@ -169,11 +169,12 @@ def build_correction_eval_callback(
             model.eval()
             try:
                 device = next(model.parameters()).device
-                exact_count = 0
-                similarities: list[float] = []
-                sample_logs: list[dict[str, str]] = []
                 subset_size = config.get_int("train.eval_subset")
                 eval_subset = rows[:subset_size] if subset_size > 0 else rows[:32]
+
+                predictions: list[str] = []
+                references: list[str] = []
+                sample_logs: list[dict[str, str]] = []
 
                 for row in eval_subset:
                     raw_input = row.get("input") or row.get("text") or ""
@@ -192,31 +193,25 @@ def build_correction_eval_callback(
                     generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
                     prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
-                    is_exact = int(prediction == gold)
-                    exact_count += is_exact
-                    sim = difflib.SequenceMatcher(None, prediction, gold).ratio()
-                    similarities.append(sim)
+                    predictions.append(prediction)
+                    references.append(gold)
                     if len(sample_logs) < 3:
                         sample_logs.append({
                             "input": raw_input,
                             "prediction": prediction,
                             "gold": gold,
-                            "exact": str(bool(is_exact)),
+                            "exact": str(bool(prediction == gold)),
                         })
 
-                n = len(eval_subset) or 1
-                exact_rate = exact_count / n
-                avg_sim = sum(similarities) / n if similarities else 0.0
-
-                metrics = {
-                    "val/exact_match": exact_rate,
-                    "val/char_similarity": avg_sim,
-                }
-                run.log(metrics, step=step)
-                self.history.append({"step": float(step), **metrics})
+                metrics = evaluate_correction_pairs(predictions, references)
+                val_metrics = {f"val/{k}": v for k, v in metrics.items()}
+                run.log(val_metrics, step=step)
+                self.history.append({"step": float(step), **val_metrics})
 
                 print(
-                    f"\n[GEC Eval @ Step {step}] Exact Match: {exact_rate:.1%} │ Char Similarity: {avg_sim:.1%}",
+                    f"\n[Correction Eval @ Step {step}] Exact Match: {metrics['correction.exact_match']:.1%} │ "
+                    f"Char Sim: {metrics['correction.char_similarity']:.1%} │ "
+                    f"Span F1: {metrics['correction.span_only_f1']:.1%}",
                     flush=True,
                 )
                 if sample_logs:
@@ -227,7 +222,7 @@ def build_correction_eval_callback(
                         f"  └ Gold:   {sample['gold'][:70]} (Exact: {sample['exact']})",
                         flush=True,
                     )
-                return metrics
+                return val_metrics
             finally:
                 if was_training:
                     model.train()
