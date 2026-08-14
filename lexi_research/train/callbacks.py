@@ -97,6 +97,14 @@ def build_eval_callback(
                 return
             self.run_once(target_model, step)
 
+        def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            step = int(state.global_step)
+            if self.history and int(self.history[-1].get("step", -1)) == step:
+                return
+            target_model = kwargs.get("model") or self.model
+            if target_model is not None:
+                self.run_once(target_model, step)
+
         def run_once(self, model: Any, step: int) -> dict[str, float]:
             was_training = model.training
             model.eval()
@@ -152,7 +160,7 @@ def build_correction_eval_callback(
     import transformers
 
     from lexi_research.eval.correction import evaluate_correction_pairs
-    from lexi_research.train.collate import render_corrector_prompt
+    from lexi_research.train.corrector_prompt import render_corrector_prompt
 
     class InLoopCorrectionEval(transformers.TrainerCallback):  # type: ignore[misc]
         def __init__(self) -> None:
@@ -168,6 +176,14 @@ def build_correction_eval_callback(
                 return
             self.run_once(target_model, step)
 
+        def on_train_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            step = int(state.global_step)
+            if self.history and int(self.history[-1].get("step", -1)) == step:
+                return
+            target_model = kwargs.get("model") or self.model
+            if target_model is not None:
+                self.run_once(target_model, step)
+
         def run_once(self, model: Any, step: int) -> dict[str, float]:
             was_training = model.training
             model.eval()
@@ -175,6 +191,11 @@ def build_correction_eval_callback(
                 device = next(model.parameters()).device
                 subset_size = config.get_int("train.eval_subset")
                 eval_subset = rows[:subset_size] if subset_size > 0 else rows[:32]
+                enable_thinking = (
+                    config.get_str("train.thinking") == "on"
+                    if "thinking" in config.section("train")
+                    else False
+                )
 
                 predictions: list[str] = []
                 references: list[str] = []
@@ -182,9 +203,24 @@ def build_correction_eval_callback(
 
                 for row in eval_subset:
                     raw_input = row.get("input") or row.get("text") or ""
-                    gold = (row.get("output") or row.get("target") or row.get("correction") or "").strip()
-                    messages = [{"role": "user", "content": render_corrector_prompt(raw_input)}]
-                    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    gold = (
+                        row.get("output")
+                        or row.get("target")
+                        or row.get("correction")
+                        or ""
+                    ).strip()
+                    messages = render_corrector_prompt(raw_input)
+                    try:
+                        prompt_text = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True,
+                            enable_thinking=enable_thinking,
+                        )
+                    except TypeError:
+                        prompt_text = tokenizer.apply_chat_template(
+                            messages, tokenize=False, add_generation_prompt=True
+                        )
                     inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
 
                     with torch.no_grad():
@@ -195,7 +231,9 @@ def build_correction_eval_callback(
                             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
                         )
                     generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
-                    prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+                    prediction = tokenizer.decode(
+                        generated_ids, skip_special_tokens=True
+                    ).strip()
 
                     predictions.append(prediction)
                     references.append(gold)
