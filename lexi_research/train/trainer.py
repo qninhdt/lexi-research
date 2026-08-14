@@ -511,9 +511,7 @@ def train_sft(
         num_train_epochs=epochs,
         max_steps=max_steps if max_steps > 0 else -1,
         per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
-        eval_strategy="steps" if val_examples else "no",
-        eval_steps=eval_steps if val_examples else None,
+        eval_strategy="no",
         gradient_accumulation_steps=grad_accum,
         learning_rate=config.get_float("train.learning_rate"),
         warmup_steps=warmup_steps,
@@ -558,7 +556,7 @@ def train_sft(
         model=model,
         args=arguments,
         train_dataset=_ExampleDataset(examples),
-        eval_dataset=_ExampleDataset(val_examples) if val_examples else None,
+        eval_dataset=None,
         data_collator=lambda batch: collate_batch(batch, pad_token_id),
     )
     if val_rows:

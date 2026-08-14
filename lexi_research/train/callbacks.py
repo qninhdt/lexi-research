@@ -257,7 +257,12 @@ def build_correction_eval_callback(
                 tokenizer.padding_side = orig_padding_side
 
                 metrics = evaluate_correction_pairs(predictions, references)
-                val_metrics = {f"val/{k}": v for k, v in metrics.items()}
+                val_metrics = {
+                    "val/exact_match": metrics["correction.exact_match"],
+                    "val/char_similarity": metrics["correction.char_similarity"],
+                    "val/span_f1": metrics["correction.span_only_f1"],
+                    "val/tag_f1": metrics.get("correction.span_tag_f1", 0.0),
+                }
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
