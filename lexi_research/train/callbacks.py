@@ -63,6 +63,7 @@ def resolve_resume(output_dir: str | Path, resume: str | None) -> str | None:
 
 def build_eval_callback(
     *,
+    model: Any | None = None,
     config: Any,
     run: Any,
     tokenizer: Any,
@@ -85,15 +86,16 @@ def build_eval_callback(
     class InLoopEval(transformers.TrainerCallback):  # type: ignore[misc]
         def __init__(self) -> None:
             self.history: list[dict[str, float]] = []
+            self.model = model
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             step = int(state.global_step)
             if every_steps <= 0 or step == 0 or step % every_steps:
                 return
-            model = kwargs.get("model")
-            if model is None:
+            target_model = kwargs.get("model") or self.model
+            if target_model is None:
                 return
-            self.run_once(model, step)
+            self.run_once(target_model, step)
 
         def run_once(self, model: Any, step: int) -> dict[str, float]:
             was_training = model.training
@@ -138,6 +140,7 @@ def build_eval_callback(
 
 def build_correction_eval_callback(
     *,
+    model: Any | None = None,
     config: Any,
     run: Any,
     tokenizer: Any,
@@ -154,15 +157,16 @@ def build_correction_eval_callback(
     class InLoopCorrectionEval(transformers.TrainerCallback):  # type: ignore[misc]
         def __init__(self) -> None:
             self.history: list[dict[str, float]] = []
+            self.model = model
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             step = int(state.global_step)
             if every_steps <= 0 or step == 0 or step % every_steps:
                 return
-            model = kwargs.get("model")
-            if model is None:
+            target_model = kwargs.get("model") or self.model
+            if target_model is None:
                 return
-            self.run_once(model, step)
+            self.run_once(target_model, step)
 
         def run_once(self, model: Any, step: int) -> dict[str, float]:
             was_training = model.training

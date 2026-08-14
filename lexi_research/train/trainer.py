@@ -555,6 +555,7 @@ def train_sft(
 
             trainer.add_callback(
                 build_eval_callback(
+                    model=model,
                     config=config,
                     run=run,
                     tokenizer=tokenizer,
@@ -569,6 +570,7 @@ def train_sft(
 
             trainer.add_callback(
                 build_correction_eval_callback(
+                    model=model,
                     config=config,
                     run=run,
                     tokenizer=tokenizer,
