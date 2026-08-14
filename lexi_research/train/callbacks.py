@@ -153,6 +153,7 @@ def build_correction_eval_callback(
     run: Any,
     tokenizer: Any,
     rows: Sequence[Mapping[str, Any]],
+    val_examples: Sequence[Any] | None = None,
     every_steps: int,
 ) -> Any:
     """A `TrainerCallback` that evaluates Grammar Correction using unified correction metrics."""
@@ -197,6 +198,34 @@ def build_correction_eval_callback(
                     else False
                 )
 
+                # 1. Compute Validation Cross-Entropy Loss
+                val_loss: float | None = None
+                if val_examples:
+                    from lexi_research.train.trainer import collate_batch
+
+                    loss_batch_size = 16 if torch.cuda.is_available() else 4
+                    total_loss = 0.0
+                    total_items = 0
+                    pad_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
+                    with torch.no_grad():
+                        for i in range(0, len(val_examples), loss_batch_size):
+                            chunk = val_examples[i : i + loss_batch_size]
+                            batch = collate_batch(chunk, pad_id)
+                            input_ids = batch["input_ids"].to(device)
+                            attention_mask = batch["attention_mask"].to(device)
+                            labels = batch["labels"].to(device)
+                            outputs = model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                labels=labels,
+                            )
+                            if outputs.loss is not None:
+                                total_loss += float(outputs.loss.item()) * len(chunk)
+                                total_items += len(chunk)
+                    if total_items > 0:
+                        val_loss = total_loss / total_items
+
+                # 2. Compute Generation Predictions
                 all_prompts: list[str] = []
                 references: list[str] = []
                 for row in eval_subset:
@@ -257,12 +286,14 @@ def build_correction_eval_callback(
                 tokenizer.padding_side = orig_padding_side
 
                 metrics = evaluate_correction_pairs(predictions, references)
-                val_metrics = {
-                    "val/exact_match": metrics["correction.exact_match"],
-                    "val/char_similarity": metrics["correction.char_similarity"],
-                    "val/span_f1": metrics["correction.span_only_f1"],
-                    "val/tag_f1": metrics.get("correction.span_tag_f1", 0.0),
-                }
+                val_metrics: dict[str, float] = {}
+                if val_loss is not None:
+                    val_metrics["val/loss"] = val_loss
+                val_metrics["val/exact_match"] = metrics["correction.exact_match"]
+                val_metrics["val/char_similarity"] = metrics["correction.char_similarity"]
+                val_metrics["val/span_f1"] = metrics["correction.span_only_f1"]
+                val_metrics["val/tag_f1"] = metrics.get("correction.span_tag_f1", 0.0)
+
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
@@ -280,8 +311,10 @@ def build_correction_eval_callback(
                 ]
                 log_correction_samples(run, sample_records, step=step, limit=8)
 
+                loss_header = f"Loss: {val_loss:.4f} │ " if val_loss is not None else ""
                 print(
                     f"\n[Correction Eval @ Step {step} over {len(eval_subset)} samples] "
+                    f"{loss_header}"
                     f"Exact Match: {metrics['correction.exact_match']:.1%} │ "
                     f"Char Sim: {metrics['correction.char_similarity']:.1%} │ "
                     f"Span F1: {metrics['correction.span_only_f1']:.1%}",

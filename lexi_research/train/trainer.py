@@ -586,6 +586,7 @@ def train_sft(
                     run=run,
                     tokenizer=tokenizer,
                     rows=val_rows,
+                    val_examples=val_examples,
                     every_steps=eval_steps,
                 )
             )
