@@ -5,9 +5,7 @@ description = "Distil a frontier sentence grader into a small local student mode
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
-authors = [
-    { name = "qninhdt", email = "qndt123@gmail.com" }
-]
+authors = [{ name = "qninhdt", email = "qndt123@gmail.com" }]
 dependencies = [
     "jinja2>=3.1",
     "liger-kernel>=0.8.1",
@@ -20,7 +18,7 @@ dependencies = [
 gpu = [
     "accelerate>=1.0",
     "bitsandbytes>=0.45",
-    "causal-conv1d>=1.6.0",
+    "causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1%2Bcu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl",
     "datasets>=3",
     "flash-linear-attention",
     "peft>=0.14",
@@ -31,16 +29,8 @@ gpu = [
     "trl>=0.12",
     "wandb",
 ]
-serve = [
-    "fastapi>=0.115",
-    "httpx>=0.27",
-    "uvicorn>=0.30",
-]
-teacher = [
-    "httpx>=0.27",
-    "json-repair>=0.63.1",
-    "langchain-openai>=0.3",
-]
+serve = ["fastapi>=0.115", "httpx>=0.27", "uvicorn>=0.30"]
+teacher = ["httpx>=0.27", "json-repair>=0.63.1", "langchain-openai>=0.3"]
 
 [project.scripts]
 lexi = "lexi_research.cli:main"
