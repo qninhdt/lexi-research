@@ -163,10 +163,33 @@ def build_correction_eval_callback(
     from lexi_research.eval.correction import evaluate_correction_pairs
     from lexi_research.train.corrector_prompt import render_corrector_prompt
 
+    def _select_hardest_indices(source_rows: Sequence[Mapping[str, Any]], k: int = 16) -> list[int]:
+        import re
+
+        tag_regex = re.compile(
+            r"\[(.*?):(sp|agr|tense|form|art|prep|part|num|poss|pron|order|punc|coll|word|unnat|other)\]"
+        )
+        scored: list[tuple[float, int]] = []
+        for i, r in enumerate(source_rows):
+            inp = str(r.get("input") or r.get("text") or "").strip()
+            gt = str(r.get("output") or r.get("target") or r.get("correction") or "").strip()
+            if inp == gt:
+                continue
+            tags = tag_regex.findall(gt)
+            num_edits = len(tags)
+            unique_tags = len(set(t[1] for t in tags))
+            length = len(inp.split())
+            score_val = num_edits * 10.0 + unique_tags * 2.0 + min(length, 40) * 0.1
+            scored.append((score_val, i))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [idx for _, idx in scored[:k]]
+
     class InLoopCorrectionEval(transformers.TrainerCallback):  # type: ignore[misc]
         def __init__(self) -> None:
             self.history: list[dict[str, float]] = []
             self.model = model
+            self.fixed_hardest_indices = _select_hardest_indices(rows, k=16)
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             step = int(state.global_step)
@@ -324,24 +347,25 @@ def build_correction_eval_callback(
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
-                # Log qualitative samples with inline visual diff to W&B (8 samples that required correction in GT)
+                # Log qualitative samples with inline visual diff to W&B (fixed 16 hardest samples)
                 from lexi_research.tracking.panels import log_correction_samples
 
-                all_records = [
+                target_indices = (
+                    self.fixed_hardest_indices
+                    if self.fixed_hardest_indices
+                    else list(range(min(16, len(eval_subset))))
+                )
+                fixed_hardest_records = [
                     {
-                        "input": str(row.get("input") or row.get("text") or "").strip(),
-                        "prediction": p,
-                        "gold": g,
-                        "exact": p == g,
+                        "input": str(eval_subset[idx].get("input") or eval_subset[idx].get("text") or "").strip(),
+                        "prediction": predictions[idx],
+                        "gold": references[idx],
+                        "exact": predictions[idx] == references[idx],
                     }
-                    for row, p, g in zip(eval_subset, predictions, references)
+                    for idx in target_indices
+                    if idx < len(eval_subset) and idx < len(predictions)
                 ]
-                # Filter strictly for samples where ground truth required an edit (input != gold)
-                edited_records = [
-                    r for r in all_records if r["input"] != r["gold"]
-                ]
-                display_records = edited_records if edited_records else all_records
-                log_correction_samples(run, display_records, step=step, limit=8)
+                log_correction_samples(run, fixed_hardest_records, step=step, limit=16)
 
                 loss_header = f"Loss: {val_loss:.4f} │ " if val_loss is not None else ""
                 print(
@@ -352,8 +376,8 @@ def build_correction_eval_callback(
                     f"Span F1: {metrics['correction.span_only_f1']:.1%}",
                     flush=True,
                 )
-                for idx in range(min(3, len(display_records))):
-                    sample = display_records[idx]
+                for idx in range(min(3, len(fixed_hardest_records))):
+                    sample = fixed_hardest_records[idx]
                     status = "✓ EXACT" if sample["exact"] else "✗ DIFF"
                     print(
                         f"  [{status}] In:   {sample['input']}\n"
