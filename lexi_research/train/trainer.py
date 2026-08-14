@@ -354,8 +354,27 @@ def _check_liger_configuration(config: Config) -> None:
         ) from exc
 
 
+def _patch_peft_torchao_compatibility() -> None:
+    try:
+        import peft.import_utils
+
+        if hasattr(peft.import_utils, "is_torchao_available"):
+            _orig_check = peft.import_utils.is_torchao_available
+
+            def _safe_is_torchao_available(*args: Any, **kwargs: Any) -> bool:
+                try:
+                    return bool(_orig_check(*args, **kwargs))
+                except Exception:
+                    return False
+
+            peft.import_utils.is_torchao_available = _safe_is_torchao_available
+    except Exception:
+        pass
+
+
 def attach_adapter(model: Any, config: Config) -> tuple[TargetResolution, Any]:
     """Resolve LoRA targets against this model and return the wrapped model."""
+    _patch_peft_torchao_compatibility()
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     spec: str | Sequence[str] = config.get("train.target_modules")

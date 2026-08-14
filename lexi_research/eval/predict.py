@@ -75,6 +75,22 @@ def load_for_inference(config: Config, adapter: str | Path | None) -> tuple[Any,
         bnb_4bit_use_double_quant=config.get_bool("train.bnb_4bit_use_double_quant"),
     )
     if adapter is not None:
+        try:
+            import peft.import_utils
+
+            if hasattr(peft.import_utils, "is_torchao_available"):
+                _orig_check = peft.import_utils.is_torchao_available
+
+                def _safe_is_torchao_available(*args: Any, **kwargs: Any) -> bool:
+                    try:
+                        return bool(_orig_check(*args, **kwargs))
+                    except Exception:
+                        return False
+
+                peft.import_utils.is_torchao_available = _safe_is_torchao_available
+        except Exception:
+            pass
+
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, str(adapter))
