@@ -150,12 +150,12 @@ class FakeGrader:
 
 
 def _text_from(messages) -> str:
-    """Recover the learner sentence from inside the untrusted block."""
+    """Recover the learner sentence from user prompt."""
     user = messages[-1]["content"]
-    start = user.index("<untrusted-")
-    start = user.index("\n", start) + 1
-    end = user.rindex("</untrusted-")
-    return user[start:end].strip()
+    prefix = "Learner's sentence:\n"
+    if prefix in user:
+        return user.split(prefix, 1)[1].strip()
+    return user.strip()
 
 
 def _client(llm) -> TeacherClient:
