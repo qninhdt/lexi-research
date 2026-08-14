@@ -477,20 +477,33 @@ def train_sft(
     optimizer = config.get_str("train.optimizer")
     if optimizer == "auto":
         optimizer = "adamw_torch_fused" if torch.cuda.is_available() else "adamw_torch"
+    warmup_ratio = config.get_float("train.warmup_ratio")
+    epochs = config.get_int("train.epochs")
+    batch_size = config.get_int("train.per_device_batch_size")
+    grad_accum = config.get_int("train.grad_accum")
+    effective_batch = max(1, batch_size * grad_accum)
+    steps_per_epoch = (len(examples) + effective_batch - 1) // effective_batch
+    total_steps = max_steps if max_steps > 0 else (steps_per_epoch * epochs)
+    warmup_steps = (
+        max(1, int(round(total_steps * warmup_ratio)))
+        if (warmup_ratio > 0 and total_steps > 0)
+        else 0
+    )
     dataloader_workers = config.get_int("train.dataloader_num_workers")
     dataloader_prefetch = config.get_int("train.dataloader_prefetch_factor")
     eval_steps = config.get_int("train.eval_steps")
+
     arguments = transformers.TrainingArguments(
         output_dir=str(output_dir),
-        num_train_epochs=config.get_int("train.epochs"),
+        num_train_epochs=epochs,
         max_steps=max_steps if max_steps > 0 else -1,
-        per_device_train_batch_size=config.get_int("train.per_device_batch_size"),
-        per_device_eval_batch_size=config.get_int("train.per_device_batch_size"),
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
         eval_strategy="steps" if val_examples else "no",
         eval_steps=eval_steps if val_examples else None,
-        gradient_accumulation_steps=config.get_int("train.grad_accum"),
+        gradient_accumulation_steps=grad_accum,
         learning_rate=config.get_float("train.learning_rate"),
-        warmup_ratio=config.get_float("train.warmup_ratio"),
+        warmup_steps=warmup_steps,
         lr_scheduler_type=config.get_str("train.lr_scheduler_type")
         if "lr_scheduler_type" in config.section("train")
         else "cosine",
