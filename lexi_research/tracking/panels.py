@@ -83,17 +83,25 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
 
 
 def compute_html_diff(pred: str | None, gold: str | None) -> str:
-    """Generate an inline HTML diff with highlighted background colors for W&B."""
+    """Generate a clean, intuitive 2-line HTML diff: PRED (Red errors) vs GOLD (Green truth)."""
     if pred is None or gold is None:
         return "<span>N/A</span>"
     p_str = pred.strip()
     g_str = gold.strip()
     if not p_str and not g_str:
-        return '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;"><span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT</span><span style="color:#6b7280;">(empty)</span></div>'
+        return (
+            '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
+            '<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT MATCH</span>'
+            '<span style="color:#6b7280;">(empty)</span></div>'
+        )
     if p_str == g_str:
         import html
 
-        return f'<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;"><span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT</span>{html.escape(p_str)}</div>'
+        return (
+            f'<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
+            f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT MATCH</span>'
+            f'{html.escape(p_str)}</div>'
+        )
 
     import difflib
     import html
@@ -101,37 +109,48 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
     p_words = p_str.split()
     g_words = g_str.split()
     matcher = difflib.SequenceMatcher(None, g_words, p_words)
-    diff_parts = []
+
+    pred_parts = []
+    gold_parts = []
+
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        g_seg = html.escape(" ".join(g_words[i1:i2]))
+        p_seg = html.escape(" ".join(p_words[j1:j2]))
         if tag == "equal":
-            diff_parts.append(html.escape(" ".join(g_words[i1:i2])))
+            pred_parts.append(p_seg)
+            gold_parts.append(g_seg)
         elif tag == "replace":
-            del_text = html.escape(" ".join(g_words[i1:i2]))
-            ins_text = html.escape(" ".join(p_words[j1:j2]))
-            diff_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{del_text}</span>'
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 4px;border-radius:3px;margin:0 1px;">{ins_text}</span>'
+            gold_parts.append(
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{g_seg}</span>'
+            )
+            pred_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{p_seg}</span>'
             )
         elif tag == "delete":
-            del_text = html.escape(" ".join(g_words[i1:i2]))
-            diff_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{del_text}</span>'
+            # Present in Gold, missing in Pred
+            gold_parts.append(
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{g_seg}</span>'
             )
         elif tag == "insert":
-            ins_text = html.escape(" ".join(p_words[j1:j2]))
-            diff_parts.append(
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 4px;border-radius:3px;margin:0 1px;">{ins_text}</span>'
+            # Hallucinated / extra in Pred, not in Gold
+            pred_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{p_seg}</span>'
             )
+
+    p_html = " ".join(pred_parts)
+    g_html = " ".join(gold_parts)
+
     return (
-        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
-        + " ".join(diff_parts)
-        + "</div>"
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;line-height:1.6;">'
+        f'<div style="margin-bottom:6px;"><span style="background-color:#fee2e2;color:#991b1b;font-weight:800;padding:2px 6px;border-radius:3px;margin-right:6px;font-size:11px;">PRED</span>{p_html}</div>'
+        f'<div><span style="background-color:#dcfce7;color:#166534;font-weight:800;padding:2px 6px;border-radius:3px;margin-right:6px;font-size:11px;">GOLD</span>{g_html}</div>'
+        '</div>'
     )
 
 
 CORRECTION_SAMPLE_COLUMNS = (
     "Input",
-    "Correction Diff (Red: GT missing | Green: Pred)",
+    "Evaluation Diff (Red: Model Pred Divergence | Green: Ground Truth Target)",
 )
 
 
