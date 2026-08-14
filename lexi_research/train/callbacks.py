@@ -258,30 +258,39 @@ def build_correction_eval_callback(
 
                 eval_batch_size = 32 if torch.cuda.is_available() else 8
                 predictions: list[str] = []
-                for i in range(0, len(all_prompts), eval_batch_size):
-                    batch_prompts = all_prompts[i : i + eval_batch_size]
-                    batch_inputs = tokenizer(
-                        batch_prompts,
-                        return_tensors="pt",
-                        padding=True,
-                        truncation=True,
-                        max_length=config.get_int("train.max_seq_len"),
-                    ).to(device)
+                from tqdm.auto import tqdm
 
-                    with torch.no_grad():
-                        batch_outputs = model.generate(
-                            **batch_inputs,
-                            max_new_tokens=128,
-                            do_sample=False,
-                            pad_token_id=tokenizer.pad_token_id,
-                        )
-                    prompt_len = batch_inputs["input_ids"].shape[1]
-                    for out_seq in batch_outputs:
-                        gen_ids = out_seq[prompt_len:]
-                        pred_text = tokenizer.decode(
-                            gen_ids, skip_special_tokens=True
-                        ).strip()
-                        predictions.append(pred_text)
+                with tqdm(
+                    total=len(all_prompts),
+                    desc=f"🔍 Validation @ Step {step}",
+                    unit="sent",
+                    leave=False,
+                ) as pbar:
+                    for i in range(0, len(all_prompts), eval_batch_size):
+                        batch_prompts = all_prompts[i : i + eval_batch_size]
+                        batch_inputs = tokenizer(
+                            batch_prompts,
+                            return_tensors="pt",
+                            padding=True,
+                            truncation=True,
+                            max_length=config.get_int("train.max_seq_len"),
+                        ).to(device)
+
+                        with torch.no_grad():
+                            batch_outputs = model.generate(
+                                **batch_inputs,
+                                max_new_tokens=128,
+                                do_sample=False,
+                                pad_token_id=tokenizer.pad_token_id,
+                            )
+                        prompt_len = batch_inputs["input_ids"].shape[1]
+                        for out_seq in batch_outputs:
+                            gen_ids = out_seq[prompt_len:]
+                            pred_text = tokenizer.decode(
+                                gen_ids, skip_special_tokens=True
+                            ).strip()
+                            predictions.append(pred_text)
+                        pbar.update(len(batch_prompts))
 
                 tokenizer.padding_side = orig_padding_side
 
