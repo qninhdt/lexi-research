@@ -480,6 +480,12 @@ def train_sft(
 
     targets, model = attach_adapter(model, config)
     print(f"LoRA targets — {targets.summary()}", flush=True)
+    if hasattr(model, "print_trainable_parameters"):
+        model.print_trainable_parameters()
+    else:
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in model.parameters())
+        print(f"Trainable params: {trainable:,} || all params: {total:,} || trainable%: {trainable / total * 100:.4f}%", flush=True)
     # KV caches are useful for generation but waste memory and can conflict
     # with checkpointed training. This does not change the forward function.
     _set_use_cache(model, False)
