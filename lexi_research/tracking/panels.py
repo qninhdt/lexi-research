@@ -83,7 +83,7 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
 
 
 def compute_html_diff(pred: str | None, gold: str | None) -> str:
-    """Generate a clean single-line prediction with Green matching tags and Red errors."""
+    """Generate a single-line diff showing Pred vs Gold: Green (matched), Red strike (missed), Red box (wrong pred)."""
     if pred is None or gold is None:
         return "<span>N/A</span>"
     p_str = pred.strip()
@@ -113,40 +113,48 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
 
     matcher = difflib.SequenceMatcher(None, g_tokens, p_tokens)
 
-    rendered_parts: list[str] = []
+    parts: list[str] = []
 
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        g_chunk = "".join(g_tokens[i1:i2])
         p_chunk = "".join(p_tokens[j1:j2])
 
-        if tag == "equal":
-            # If the matching chunk is a tag [A>B:tag], highlight in GREEN!
-            # If regular unchanged text, leave uncolored.
+        if op == "equal":
+            # Matching tokens: if it is a tag -> GREEN; if regular text -> plain uncolored
             for tok in p_tokens[j1:j2]:
                 if tok.startswith("[") and tok.endswith("]"):
-                    rendered_parts.append(
-                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(tok)}</span>'
+                    parts.append(
+                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(tok)}</span>'
                     )
                 else:
-                    rendered_parts.append(html.escape(tok))
-        elif tag in ("replace", "insert"):
-            # Model generated a wrong tag, wrong replacement text, or extra tag -> RED
-            rendered_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
+                    parts.append(html.escape(tok))
+        elif op == "replace":
+            # Gold missed (RED strikethrough) + Pred wrong generated (RED boxed)
+            parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#fef2f2;color:#991b1b;font-weight:700;border:1px solid #f87171;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
             )
-        elif tag == "delete":
-            # Model missed a tag/edit from Gold
-            pass
+        elif op == "delete":
+            # Gold missed in Pred (RED strikethrough)
+            parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
+            )
+        elif op == "insert":
+            # Pred extra / hallucinated (RED boxed)
+            parts.append(
+                f'<span style="background-color:#fef2f2;color:#991b1b;font-weight:700;border:1px solid #f87171;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
+            )
 
     return (
-        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
-        + "".join(rendered_parts)
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.7;">'
+        + "".join(parts)
         + "</div>"
     )
 
 
 CORRECTION_SAMPLE_COLUMNS = (
     "Input",
-    "Correction (Green: Tag Matched | Red: Error/Wrong Tag | Plain: Unchanged)",
+    "Correction (Green: Matched Tag │ Red Strikethrough: Missed Gold │ Red Box: Wrong Pred)",
 )
 
 
