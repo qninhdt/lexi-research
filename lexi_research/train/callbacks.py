@@ -200,25 +200,29 @@ def build_correction_eval_callback(
 
                 # 1. Compute Validation Cross-Entropy Loss
                 val_loss: float | None = None
+                use_cuda_autocast = torch.cuda.is_available() and device.type == "cuda"
+                amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+
                 if val_examples:
                     from lexi_research.train.trainer import collate_batch
 
-                    loss_batch_size = 16 if torch.cuda.is_available() else 4
+                    loss_batch_size = 32 if torch.cuda.is_available() else 4
                     total_loss = 0.0
                     total_items = 0
                     pad_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         for i in range(0, len(val_examples), loss_batch_size):
                             chunk = val_examples[i : i + loss_batch_size]
                             batch = collate_batch(chunk, pad_id)
                             input_ids = batch["input_ids"].to(device)
                             attention_mask = batch["attention_mask"].to(device)
                             labels = batch["labels"].to(device)
-                            outputs = model(
-                                input_ids=input_ids,
-                                attention_mask=attention_mask,
-                                labels=labels,
-                            )
+                            with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_cuda_autocast):
+                                outputs = model(
+                                    input_ids=input_ids,
+                                    attention_mask=attention_mask,
+                                    labels=labels,
+                                )
                             if outputs.loss is not None:
                                 total_loss += float(outputs.loss.item()) * len(chunk)
                                 total_items += len(chunk)
@@ -266,31 +270,33 @@ def build_correction_eval_callback(
                     unit="sent",
                     leave=False,
                 ) as pbar:
-                    for i in range(0, len(all_prompts), eval_batch_size):
-                        batch_prompts = all_prompts[i : i + eval_batch_size]
-                        batch_inputs = tokenizer(
-                            batch_prompts,
-                            return_tensors="pt",
-                            padding=True,
-                            truncation=True,
-                            max_length=config.get_int("train.max_seq_len"),
-                        ).to(device)
+                    with torch.inference_mode():
+                        for i in range(0, len(all_prompts), eval_batch_size):
+                            batch_prompts = all_prompts[i : i + eval_batch_size]
+                            batch_inputs = tokenizer(
+                                batch_prompts,
+                                return_tensors="pt",
+                                padding=True,
+                                truncation=True,
+                                max_length=config.get_int("train.max_seq_len"),
+                            ).to(device)
 
-                        with torch.no_grad():
-                            batch_outputs = model.generate(
-                                **batch_inputs,
-                                max_new_tokens=128,
-                                do_sample=False,
-                                pad_token_id=tokenizer.pad_token_id,
-                            )
-                        prompt_len = batch_inputs["input_ids"].shape[1]
-                        for out_seq in batch_outputs:
-                            gen_ids = out_seq[prompt_len:]
-                            pred_text = tokenizer.decode(
-                                gen_ids, skip_special_tokens=True
-                            ).strip()
-                            predictions.append(pred_text)
-                        pbar.update(len(batch_prompts))
+                            with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_cuda_autocast):
+                                batch_outputs = model.generate(
+                                    **batch_inputs,
+                                    max_new_tokens=128,
+                                    do_sample=False,
+                                    use_cache=True,
+                                    pad_token_id=tokenizer.pad_token_id,
+                                )
+                            prompt_len = batch_inputs["input_ids"].shape[1]
+                            for out_seq in batch_outputs:
+                                gen_ids = out_seq[prompt_len:]
+                                pred_text = tokenizer.decode(
+                                    gen_ids, skip_special_tokens=True
+                                ).strip()
+                                predictions.append(pred_text)
+                            pbar.update(len(batch_prompts))
 
                 tokenizer.padding_side = orig_padding_side
 
