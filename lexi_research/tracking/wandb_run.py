@@ -175,6 +175,7 @@ def start(
     lineage: Mapping[str, Any],
     output_dir: str | Path | None = None,
     run_id: str | None = None,
+    allow_resume: bool = True,
 ) -> Run:
     """Open a run for `stage`, or a handle that records nothing."""
     mode = resolve_mode(config)
@@ -195,7 +196,7 @@ def start(
     if not run_id and output_dir:
         out_path = Path(output_dir)
         id_file = out_path / "wandb_id.txt"
-        if id_file.exists():
+        if allow_resume and id_file.exists():
             try:
                 run_id = id_file.read_text().strip()
             except Exception:  # noqa: BLE001

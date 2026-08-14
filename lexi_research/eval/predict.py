@@ -75,21 +75,22 @@ def load_for_inference(config: Config, adapter: str | Path | None) -> tuple[Any,
         bnb_4bit_use_double_quant=config.get_bool("train.bnb_4bit_use_double_quant"),
     )
     if adapter is not None:
-        try:
-            import peft.import_utils
+        import sys
 
-            if hasattr(peft.import_utils, "is_torchao_available"):
-                _orig_check = peft.import_utils.is_torchao_available
+        if "torchao" not in sys.modules:
+            try:
+                import importlib.util
 
-                def _safe_is_torchao_available(*args: Any, **kwargs: Any) -> bool:
-                    try:
-                        return bool(_orig_check(*args, **kwargs))
-                    except Exception:
-                        return False
+                if importlib.util.find_spec("torchao") is not None:
+                    import torchao
+                    import packaging.version
 
-                peft.import_utils.is_torchao_available = _safe_is_torchao_available
-        except Exception:
-            pass
+                    if packaging.version.parse(
+                        getattr(torchao, "__version__", "0.0.0")
+                    ) < packaging.version.parse("0.16.0"):
+                        sys.modules["torchao"] = None
+            except Exception:
+                sys.modules["torchao"] = None
 
         from peft import PeftModel
 

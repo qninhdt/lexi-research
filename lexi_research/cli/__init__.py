@@ -246,7 +246,14 @@ def _train_once(
 
     run_config = config.with_overrides([f"tracking.group={group}"]) if group else config
     lineage = collect(run_config.as_dict(), stage=stage)
-    run = start(run_config, stage=stage, lineage=lineage, output_dir=output_dir)
+    allow_resume = bool(args.resume != "none")
+    run = start(
+        run_config,
+        stage=stage,
+        lineage=lineage,
+        output_dir=output_dir,
+        allow_resume=allow_resume,
+    )
 
     try:
         result = train_sft(
