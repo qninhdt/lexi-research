@@ -22,11 +22,8 @@ openai
 httpx
 fastapi
 uvicorn
-causal-conv1d>=1.6.0
 flash-linear-attention
+flash-attn
 liger-kernel
 # Install current package in editable mode
 -e .
-
-
-

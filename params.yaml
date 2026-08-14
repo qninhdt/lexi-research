@@ -146,15 +146,15 @@ train:
   # above 1 would break it. `run_colab_train.sh` raises the batch for Qwen,
   # where the same effective batch of 32 is reached with accumulation 8 and
   # measurably less wall-clock. Raise this only for a model verified to fit.
-  per_device_batch_size: 4
-  grad_accum: 8
+  per_device_batch_size: 8
+  grad_accum: 1
   warmup_ratio: 0.03
   seed: 20260729
   logging_steps: 10
   save_steps: 100
-  # Native PyTorch SDPA uses the L4's fused attention kernels on the model's
-  # full-attention blocks. Linear-attention blocks keep their own fused path.
-  attn_implementation: sdpa
+  # FlashAttention-2 uses Tri Dao's fused kernels for full-attention blocks,
+  # supporting varlen unpadding/padding-free. Linear blocks use flash-linear-attention.
+  attn_implementation: flash_attention_2
   # `auto` selects fused AdamW on CUDA and the portable implementation on CPU.
   # This changes kernel fusion only; the optimizer update and hyperparameters
   # remain the same.
