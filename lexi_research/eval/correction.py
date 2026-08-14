@@ -174,6 +174,120 @@ def evaluate_correction_pairs(
     }
 
 
+def compute_f_beta(matched: int, predicted: int, gold: int, beta: float = 0.5) -> tuple[float, float, float]:
+    """Compute Precision, Recall, and F-beta score (default beta=0.5). Two empty sets agree perfectly."""
+    if not predicted and not gold:
+        return 1.0, 1.0, 1.0
+    precision = matched / predicted if predicted else 0.0
+    recall = matched / gold if gold else 0.0
+    beta_sq = beta * beta
+    denom = (beta_sq * precision) + recall
+    if denom == 0.0:
+        return precision, recall, 0.0
+    f_beta = (1 + beta_sq) * (precision * recall) / denom
+    return precision, recall, f_beta
+
+
+def evaluate_span_predictions(
+    raw_inputs: Sequence[str],
+    predictions: Sequence[str | None],
+    references: Sequence[str | None],
+) -> dict[str, float]:
+    """Evaluate 4 core metrics on span edit predictions against gold references.
+
+    Metrics:
+    1. Full Edit F0.5: Exact match on (start, end, tag, replacement)
+    2. Span F0.5: Match on (start, end) detection only
+    3. Clean Accuracy: Accuracy of predicting OK on clean sentences
+    4. Valid Output Rate: Share of syntactically valid model outputs
+    """
+    from lexi_research.format.span_converter import (
+        markup_to_spans,
+        parse_span_output,
+        validate_span_edits,
+    )
+    from lexi_research.format.units import SpanEdit, lex_units
+
+    total_samples = len(raw_inputs) or 1
+    valid_count = 0
+    clean_total = 0
+    clean_correct = 0
+
+    total_full_pred = 0
+    total_full_gold = 0
+    total_full_matched = 0
+
+    total_span_pred = 0
+    total_span_gold = 0
+    total_span_matched = 0
+
+    for raw, pred_str, gold_str in zip(raw_inputs, predictions, references):
+        raw_text = str(raw or "").strip()
+        p_text = str(pred_str or "").strip()
+        g_text = str(gold_str or "").strip()
+
+        units = lex_units(raw_text)
+        num_units = len(units)
+
+        # Parse gold
+        if "[" in g_text and "]" in g_text:
+            g_spans_str = markup_to_spans(raw_text, g_text)
+        else:
+            g_spans_str = g_text
+
+        g_parsed = parse_span_output(g_spans_str)
+        is_gold_clean = g_parsed == "OK" or (isinstance(g_parsed, list) and len(g_parsed) == 0)
+        if is_gold_clean:
+            clean_total += 1
+
+        # Parse pred
+        is_valid, _ = validate_span_edits(p_text, num_units)
+        if is_valid:
+            valid_count += 1
+
+        p_parsed = parse_span_output(p_text)
+        is_pred_clean = p_parsed == "OK" or (isinstance(p_parsed, list) and len(p_parsed) == 0)
+
+        if is_gold_clean and is_pred_clean:
+            clean_correct += 1
+
+        # Convert to sets of tuples
+        p_full_set: set[tuple[int, int, str, str]] = set()
+        p_span_set: set[tuple[int, int]] = set()
+        if isinstance(p_parsed, list):
+            for e in p_parsed:
+                p_full_set.add((e.start, e.end, e.tag, e.replacement))
+                p_span_set.add((e.start, e.end))
+
+        g_full_set: set[tuple[int, int, str, str]] = set()
+        g_span_set: set[tuple[int, int]] = set()
+        if isinstance(g_parsed, list):
+            for e in g_parsed:
+                g_full_set.add((e.start, e.end, e.tag, e.replacement))
+                g_span_set.add((e.start, e.end))
+
+        total_full_pred += len(p_full_set)
+        total_full_gold += len(g_full_set)
+        total_full_matched += len(p_full_set & g_full_set)
+
+        total_span_pred += len(p_span_set)
+        total_span_gold += len(g_span_set)
+        total_span_matched += len(p_span_set & g_span_set)
+
+    _, _, full_f05 = compute_f_beta(total_full_matched, total_full_pred, total_full_gold, beta=0.5)
+    _, _, span_f05 = compute_f_beta(total_span_matched, total_span_pred, total_span_gold, beta=0.5)
+
+    clean_acc = (clean_correct / clean_total) if clean_total > 0 else 1.0
+    valid_rate = valid_count / total_samples
+
+    return {
+        "correction.full_edit_f05": full_f05,
+        "correction.span_f05": span_f05,
+        "correction.clean_accuracy": clean_acc,
+        "correction.valid_output_rate": valid_rate,
+    }
+
+
 def other_rate(counts: Mapping[str, int]) -> float:
     """Share of edits tagged `other` — how much the taxonomy is failing to cover.
 
@@ -188,9 +302,11 @@ def other_rate(counts: Mapping[str, int]) -> float:
 __all__ = [
     "CorrectionScores",
     "Triple",
+    "compute_f_beta",
     "correction_scores",
     "edit_triples",
     "evaluate_correction_pairs",
+    "evaluate_span_predictions",
     "other_rate",
     "tag_distribution",
 ]

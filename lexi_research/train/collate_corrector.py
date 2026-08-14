@@ -47,17 +47,16 @@ def corrector_messages(row: Mapping[str, Any]) -> list[ChatMsg]:
 
 
 def corrector_answer(row: Mapping[str, Any]) -> str:
-    """The gold answer: the correction string, or `null` for an unreadable sentence.
+    """The gold answer in span edit format: 'START END TAG REP', 'OK', or 'NULL'."""
+    from lexi_research.format.span_converter import markup_to_spans
 
-    The literal `null` matches what the grader emits in the same situation, so
-    the two stages agree on how "this cannot be corrected" is spelled.
-    """
+    raw_text = str(row.get("text") or "")
     correction = row.get("correction")
     if correction is None:
-        return "null"
+        return "NULL"
     if not isinstance(correction, str):
         raise CollationError(f"correction is {type(correction).__name__}, not a string")
-    return correction
+    return markup_to_spans(raw_text, correction)
 
 
 def _supervised_text(row: Mapping[str, Any], thinking: str) -> str:

@@ -349,14 +349,29 @@ def build_correction_eval_callback(
 
                 tokenizer.padding_side = orig_padding_side
 
-                metrics = evaluate_correction_pairs(predictions, references)
+                from lexi_research.eval.correction import evaluate_span_predictions
+                from lexi_research.format.span_converter import render_spans_to_markup
+
+                raw_inputs = [
+                    str(row.get("input") or row.get("text") or "").strip()
+                    for row in eval_subset
+                ]
+
+                # Render span predictions back to canonical inline markup for visual diffing
+                rendered_predictions = [
+                    render_spans_to_markup(raw, pred)
+                    for raw, pred in zip(raw_inputs, predictions)
+                ]
+
+                span_metrics = evaluate_span_predictions(raw_inputs, predictions, references)
+
                 val_metrics: dict[str, float] = {}
                 if val_loss is not None:
                     val_metrics["val/loss"] = val_loss
-                val_metrics["val/exact_match"] = metrics["correction.exact_match"]
-                val_metrics["val/char_similarity"] = metrics["correction.char_similarity"]
-                val_metrics["val/span_f1"] = metrics["correction.span_only_f1"]
-                val_metrics["val/tag_f1"] = metrics.get("correction.span_tag_f1", 0.0)
+                val_metrics["val/full_edit_f05"] = span_metrics["correction.full_edit_f05"]
+                val_metrics["val/span_f05"] = span_metrics["correction.span_f05"]
+                val_metrics["val/clean_accuracy"] = span_metrics["correction.clean_accuracy"]
+                val_metrics["val/valid_output_rate"] = span_metrics["correction.valid_output_rate"]
 
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
@@ -371,13 +386,13 @@ def build_correction_eval_callback(
                 )
                 fixed_hardest_records = [
                     {
-                        "input": str(eval_subset[idx].get("input") or eval_subset[idx].get("text") or "").strip(),
-                        "prediction": predictions[idx],
+                        "input": raw_inputs[idx],
+                        "prediction": rendered_predictions[idx],
                         "gold": references[idx],
-                        "exact": predictions[idx] == references[idx],
+                        "exact": rendered_predictions[idx] == references[idx],
                     }
                     for idx in target_indices
-                    if idx < len(eval_subset) and idx < len(predictions)
+                    if idx < len(eval_subset) and idx < len(rendered_predictions)
                 ]
                 log_correction_samples(run, fixed_hardest_records, step=step, limit=16)
 
@@ -385,9 +400,10 @@ def build_correction_eval_callback(
                 print(
                     f"\n[Correction Eval @ Step {step} over {len(eval_subset)} samples] "
                     f"{loss_header}"
-                    f"Exact Match: {metrics['correction.exact_match']:.1%} │ "
-                    f"Char Sim: {metrics['correction.char_similarity']:.1%} │ "
-                    f"Span F1: {metrics['correction.span_only_f1']:.1%}",
+                    f"Full Edit F0.5: {val_metrics['val/full_edit_f05']:.1%} │ "
+                    f"Span F0.5: {val_metrics['val/span_f05']:.1%} │ "
+                    f"Clean Acc: {val_metrics['val/clean_accuracy']:.1%} │ "
+                    f"Valid Rate: {val_metrics['val/valid_output_rate']:.1%}",
                     flush=True,
                 )
                 for idx in range(min(3, len(fixed_hardest_records))):

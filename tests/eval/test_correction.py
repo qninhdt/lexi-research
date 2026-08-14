@@ -161,3 +161,40 @@ def test_scores_accumulate_across_calls(config) -> None:
     assert payload["predicted_edits"] == 2
     # One of two matched: P = R = 0.5, so F1 = 0.5.
     assert payload["span_tag_f1"] == pytest.approx(0.5)
+
+
+def test_evaluate_span_predictions_core_metrics() -> None:
+    from lexi_research.eval.correction import compute_f_beta, evaluate_span_predictions
+
+    # F0.5 formula check: P=1.0, R=0.5 -> F0.5 = 1.25 * (1 * 0.5) / (0.25 * 1 + 0.5) = 0.625 / 0.75 = 0.8333
+    p, r, f05 = compute_f_beta(1, 1, 2, beta=0.5)
+    assert p == 1.0
+    assert r == 0.5
+    assert f05 == pytest.approx(5 / 6)
+
+    raw_inputs = [
+        "He speak English.",
+        "She speak very well.",
+        "This is clean.",
+    ]
+    predictions = [
+        "2 3 agr speaks",
+        "2 3 word spoke",  # right span [2,3), wrong tag
+        "OK",
+    ]
+    references = [
+        "He [speak>speaks:agr] English.",
+        "She [speak>spoke:tense] very well.",
+        "This is clean.",
+    ]
+
+    metrics = evaluate_span_predictions(raw_inputs, predictions, references)
+    # Full edit: 1 match out of 2 pred and 2 gold -> P=0.5, R=0.5 -> F0.5=0.5
+    assert metrics["correction.full_edit_f05"] == pytest.approx(0.5)
+    # Span detection: 2 matches out of 2 pred and 2 gold -> P=1.0, R=1.0 -> F0.5=1.0
+    assert metrics["correction.span_f05"] == pytest.approx(1.0)
+    # Clean sentence: 1 clean sentence predicted OK -> Clean Acc = 1.0
+    assert metrics["correction.clean_accuracy"] == 1.0
+    # Valid rate: all 3 outputs valid -> 1.0
+    assert metrics["correction.valid_output_rate"] == 1.0
+

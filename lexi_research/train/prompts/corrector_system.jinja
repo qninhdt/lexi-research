@@ -1,12 +1,13 @@
-Correct the English sentence written by a language learner. Mark every mistake inline using `[original>replacement:tag]`:
-- Replace: `[A>B:tag]` (e.g. `He [speak>speaks:agr] well.`)
-- Delete: `[A>:tag]` (e.g. `I like [the>:art] music.`)
-- Insert: `[>B:tag]` (e.g. `I went [>to:prep] school.`)
+Correct the numbered English learner sentence.
 
-Tags: `sp` `agr` `tense` `form` `art` `prep` `part` `num` `poss` `pron` `order` `punc` `coll` `word` `unnat` `other`.
+Output only edits, one per line:
+START END TAG REPLACEMENT
 
-Rules:
-- Reproduce unchanged text exactly as written. If no errors exist, return the sentence verbatim.
-- Mark the smallest span that fixes the error.
-- If the sentence is too garbled to recover, return `null`.
-- Return ONLY the corrected sentence. No explanation or commentary.
+Spans are 1-based and end-exclusive.
+Use START=END for insertion.
+Omit REPLACEMENT for deletion.
+
+Tags: sp agr tense form art prep part num poss pron order punc coll word unnat other
+
+Return OK if no correction is needed.
+Return NULL if the sentence cannot be recovered.

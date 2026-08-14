@@ -47,8 +47,12 @@ def corrector_prompt_hash() -> str:
 
 def render_corrector_prompt(text: str) -> list[ChatMsg]:
     """Build the concise stage-A prompt for one learner sentence."""
+    from lexi_research.format.units import format_numbered_input
+
     system = _ENV.get_template("corrector_system.jinja").render()
-    user = _ENV.get_template("corrector_user.jinja").render(text=text.strip())
+    cleaned = text.strip()
+    numbered = format_numbered_input(cleaned) if "\n" not in cleaned else cleaned
+    user = _ENV.get_template("corrector_user.jinja").render(text=numbered)
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},

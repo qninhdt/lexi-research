@@ -26,7 +26,20 @@ from .parser import (
     render,
     strip_markup,
 )
+from .span_converter import (
+    markup_to_spans,
+    parse_span_output,
+    render_spans_to_markup,
+    validate_span_edits,
+)
 from .tags import CONFUSABLE_PAIRS, GROUP_OF, TAGS, Tag, TagGroup, group_of
+from .units import (
+    UNIT_RE,
+    SpanEdit,
+    Unit,
+    format_numbered_input,
+    lex_units,
+)
 from .validate import ValidationError, ValidationOk, ValidationResult, validate_output
 
 __all__ = [
@@ -36,24 +49,33 @@ __all__ = [
     "MAX_BAND",
     "MIN_BAND",
     "TAGS",
+    "UNIT_RE",
     "BandConfig",
     "Bands",
     "Edit",
     "ParseError",
     "ParseOk",
     "ParseResult",
+    "SpanEdit",
     "Tag",
     "TagGroup",
+    "Unit",
     "ValidationError",
     "ValidationOk",
     "ValidationResult",
     "count_words",
     "default_config_path",
     "derive_bands",
+    "format_numbered_input",
     "group_of",
+    "lex_units",
+    "markup_to_spans",
     "parse_correction",
+    "parse_span_output",
     "penalty",
     "render",
+    "render_spans_to_markup",
     "strip_markup",
     "validate_output",
+    "validate_span_edits",
 ]
