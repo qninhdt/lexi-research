@@ -123,8 +123,9 @@ def build_eval_callback(
                 # absent still has to show whether the run is going anywhere.
                 print(
                     f"in-loop eval @ {step} — "
-                    f"validity {flat.get('format.validity_rate', 0):.2f}, "
-                    f"meaning exact {flat.get('meaning.exact', 0):.2f}",
+                    f"validity: {flat.get('format.validity_rate', 0):.2f} │ "
+                    f"band exact: {flat.get('meaning.exact', 0):.2f} │ "
+                    f"correction F1: {flat.get('correction.span_tag_f1', 0):.2f}",
                     flush=True,
                 )
                 return flat
