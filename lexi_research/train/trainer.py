@@ -591,6 +591,8 @@ def train_sft(
                     every_steps=eval_steps,
                 )
             )
+    else:
+        print("ℹ️ In-loop evaluation is disabled (no --val dataset provided).", flush=True)
     trainer.add_callback(build_progress_callback())
 
     outcome = trainer.train(resume_from_checkpoint=resolve_resume(output_dir, resume))
