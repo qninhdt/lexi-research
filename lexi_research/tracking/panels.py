@@ -83,7 +83,7 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
 
 
 def compute_html_diff(pred: str | None, gold: str | None) -> str:
-    """Generate a single-line diff showing Pred vs Gold: Green (matched), Red strike (missed), Red box (wrong pred)."""
+    """Generate a single-line diff: Green (matched / gold target), Red strikethrough (wrong / extra pred)."""
     if pred is None or gold is None:
         return "<span>N/A</span>"
     p_str = pred.strip()
@@ -129,20 +129,21 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
                 else:
                     parts.append(html.escape(tok))
         elif op == "replace":
-            # Gold missed (RED strikethrough) + Pred wrong generated (RED boxed)
+            # 1. Strike through wrong model prediction (RED strikethrough)
+            # 2. Show expected correct Ground Truth (GREEN box)
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
-                f'<span style="background-color:#fef2f2;color:#991b1b;font-weight:700;border:1px solid #f87171;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;border:1px solid #86efac;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
             )
         elif op == "delete":
-            # Gold missed in Pred (RED strikethrough)
+            # Model missed something from Gold -> show expected Ground Truth (GREEN dashed box)
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;border:1px dashed #22c55e;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
             )
         elif op == "insert":
-            # Pred extra / hallucinated (RED boxed)
+            # Model hallucinated / extra text/tag -> strike through (RED strikethrough)
             parts.append(
-                f'<span style="background-color:#fef2f2;color:#991b1b;font-weight:700;border:1px solid #f87171;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
             )
 
     return (
@@ -154,7 +155,7 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
 
 CORRECTION_SAMPLE_COLUMNS = (
     "Input",
-    "Correction (Green: Matched Tag │ Red Strikethrough: Missed Gold │ Red Box: Wrong Pred)",
+    "Correction (Green: Correct / Expected Target │ Red Strikethrough: Wrong Model Prediction)",
 )
 
 
