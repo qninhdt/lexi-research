@@ -252,7 +252,44 @@ def load_model_and_tokenizer(
         removed = _drop_unused_multimodal_towers(model)
         if removed:
             print(f"text-only load — removed {', '.join(removed)}", flush=True)
+    _log_model_attention_info(model)
     return model, tokenizer
+
+
+def _log_model_attention_info(model: Any) -> None:
+    """Log PyTorch version and verify if FlashAttention-2 / SDPA kernel is active."""
+    import torch
+
+    attn_impl = getattr(getattr(model, "config", None), "_attn_implementation", "default")
+    torch_ver = torch.__version__
+
+    flash_ver = "unavailable"
+    attn_pkg = getattr(getattr(torch, "nn", None), "attention", None)
+    if attn_pkg and hasattr(attn_pkg, "_get_flash_version"):
+        try:
+            flash_ver = str(attn_pkg._get_flash_version())
+        except Exception:
+            pass
+
+    status = f"model attention — implementation: {attn_impl}, torch: {torch_ver}, embedded flash-attn: {flash_ver}"
+
+    if torch.cuda.is_available() and attn_impl == "sdpa":
+        can_flash = False
+        try:
+            from torch.nn.attention import SDPBackend, sdpa_kernel
+
+            q = torch.zeros(1, 1, 16, 64, dtype=torch.bfloat16, device="cuda")
+            with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                _ = torch.nn.functional.scaled_dot_product_attention(q, q, q)
+            can_flash = True
+        except Exception:
+            pass
+        if can_flash:
+            status += " (FlashAttention-2 active on GPU)"
+        else:
+            status += " (Memory-Efficient / Math fallback)"
+
+    print(status, flush=True)
 
 
 def collate_batch(batch: Sequence[Example], pad_token_id: int) -> dict[str, Any]:
