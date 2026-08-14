@@ -311,18 +311,60 @@ class _ExampleDataset:
         return iter(self._examples)
 
 
+class ShuffledLengthGroupedSampler:
+    """A length-grouped sampler that shuffles the batches randomly.
+
+    Batches internally contain samples of very similar lengths to eliminate padding waste,
+    while the global batch order is randomly shuffled to avoid the 50-step periodic
+    sawtooth loss artifacts of standard monotonic length grouping.
+    """
+
+    def __init__(
+        self,
+        batch_size: int,
+        dataset: Any,
+        lengths: Sequence[int],
+        seed: int = 42,
+    ) -> None:
+        self.batch_size = max(1, batch_size)
+        self.dataset = dataset
+        self.lengths = list(lengths)
+        self.seed = seed
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __iter__(self) -> Iterator[int]:
+        import numpy as np
+
+        rng = np.random.default_rng(self.seed + self.epoch)
+        indices = np.argsort(self.lengths)
+        batches = [
+            indices[i : i + self.batch_size].tolist()
+            for i in range(0, len(indices), self.batch_size)
+        ]
+        rng.shuffle(batches)
+        for batch in batches:
+            yield from batch
+
+
 def _trainer_class(transformers: Any) -> Any:
-    """Build a Trainer that supports length-grouped sampling over Example dataclass."""
+    """Build a Trainer that supports shuffled length-grouped sampling over Example dataclass."""
 
     class LexiTrainer(transformers.Trainer):  # type: ignore[misc]
         def _get_train_sampler(self, train_dataset: Any = None) -> Any:
             if getattr(self.args, "train_sampling_strategy", None) == "group_by_length":
                 dataset = train_dataset if train_dataset is not None else self.train_dataset
                 lengths = [len(e.input_ids) for e in dataset]
-                return transformers.trainer_pt_utils.LengthGroupedSampler(
-                    self.args.train_batch_size * self.args.gradient_accumulation_steps,
+                return ShuffledLengthGroupedSampler(
+                    batch_size=self.args.train_batch_size * self.args.gradient_accumulation_steps,
                     dataset=dataset,
                     lengths=lengths,
+                    seed=int(self.args.seed or 42),
                 )
             return super()._get_train_sampler(train_dataset)
 
