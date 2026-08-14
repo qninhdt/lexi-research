@@ -89,11 +89,11 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
     p_str = pred.strip()
     g_str = gold.strip()
     if not p_str and not g_str:
-        return '<span style="color:#16a34a;font-weight:600;">✓ EXACT MATCH</span>'
+        return '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;"><span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT</span><span style="color:#6b7280;">(empty)</span></div>'
     if p_str == g_str:
         import html
 
-        return f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:2px 6px;border-radius:4px;">✓ MATCH: {html.escape(p_str)}</span>'
+        return f'<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;"><span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT</span>{html.escape(p_str)}</div>'
 
     import difflib
     import html
