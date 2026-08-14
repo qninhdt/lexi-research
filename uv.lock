@@ -1687,16 +1687,11 @@ name = "lexi-research"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fastapi" },
-    { name = "httpx" },
     { name = "jinja2" },
-    { name = "json-repair" },
-    { name = "langchain-openai" },
     { name = "liger-kernel" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -1706,25 +1701,37 @@ gpu = [
     { name = "causal-conv1d" },
     { name = "datasets" },
     { name = "flash-linear-attention" },
-    { name = "ninja" },
-    { name = "packaging" },
     { name = "peft" },
-    { name = "psutil" },
     { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
     { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
     { name = "transformers" },
     { name = "trl" },
     { name = "wandb" },
 ]
+serve = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn" },
+]
+teacher = [
+    { name = "httpx" },
+    { name = "json-repair" },
+    { name = "langchain-openai" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "dvc" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "json-repair" },
+    { name = "langchain-openai" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
     { name = "types-pyyaml" },
+    { name = "uvicorn" },
 ]
 smoke = [
     { name = "accelerate" },
@@ -1742,36 +1749,39 @@ requires-dist = [
     { name = "bitsandbytes", marker = "extra == 'gpu'", specifier = ">=0.45" },
     { name = "causal-conv1d", marker = "extra == 'gpu'", specifier = ">=1.6.0" },
     { name = "datasets", marker = "extra == 'gpu'", specifier = ">=3" },
-    { name = "fastapi", specifier = ">=0.115" },
+    { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
     { name = "flash-linear-attention", marker = "extra == 'gpu'" },
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'teacher'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
-    { name = "json-repair", specifier = ">=0.63.1" },
-    { name = "langchain-openai", specifier = ">=0.3" },
+    { name = "json-repair", marker = "extra == 'teacher'", specifier = ">=0.63.1" },
+    { name = "langchain-openai", marker = "extra == 'teacher'", specifier = ">=0.3" },
     { name = "liger-kernel", specifier = ">=0.8.1" },
-    { name = "ninja", marker = "extra == 'gpu'" },
-    { name = "packaging", marker = "extra == 'gpu'" },
     { name = "peft", marker = "extra == 'gpu'", specifier = ">=0.14" },
-    { name = "psutil", marker = "extra == 'gpu'" },
     { name = "pyarrow", specifier = ">=17" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu" },
     { name = "transformers", marker = "extra == 'gpu'", specifier = ">=4.48" },
     { name = "trl", marker = "extra == 'gpu'", specifier = ">=0.12" },
-    { name = "uvicorn", specifier = ">=0.30" },
+    { name = "uvicorn", marker = "extra == 'serve'", specifier = ">=0.30" },
     { name = "wandb", marker = "extra == 'gpu'" },
 ]
-provides-extras = ["gpu"]
+provides-extras = ["gpu", "serve", "teacher"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "dvc", specifier = ">=3.0" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "json-repair", specifier = ">=0.63.1" },
+    { name = "langchain-openai", specifier = ">=0.3" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.9" },
     { name = "types-pyyaml", specifier = ">=6" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 smoke = [
     { name = "accelerate", specifier = ">=1.0" },
