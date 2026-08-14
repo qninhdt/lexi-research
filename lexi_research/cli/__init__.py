@@ -241,7 +241,8 @@ def _train_once(
     ceiling = None
     if args.val:
         subset = config.get_int("train.eval_subset")
-        val_rows = list(iter_rows(args.val))[:subset]
+        all_val = list(iter_rows(args.val))
+        val_rows = all_val[:subset] if subset > 0 else all_val
         ceiling = load_ceiling(args.ceiling) if args.ceiling else {}
 
     run_config = config.with_overrides([f"tracking.group={group}"]) if group else config

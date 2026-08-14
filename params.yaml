@@ -171,9 +171,8 @@ train:
   # In-loop evaluation interval. Loss falls smoothly while format validity
   # collapses, so the harness runs during training rather than after it. 0 is off.
   eval_steps: 100
-  # Rows scored in loop. Fixed and small, and fixed across arms — an ablation
-  # whose arms were scored on different rows is not an ablation.
-  eval_subset: 32
+  # Rows scored in loop. 0 evaluates the entire validation set.
+  eval_subset: 0
   gradient_checkpointing: false
   # Non-reentrant checkpointing is lower-overhead on current PyTorch, but keep
 

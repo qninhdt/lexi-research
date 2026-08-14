@@ -190,17 +190,15 @@ def build_correction_eval_callback(
             try:
                 device = next(model.parameters()).device
                 subset_size = config.get_int("train.eval_subset")
-                eval_subset = rows[:subset_size] if subset_size > 0 else rows[:32]
+                eval_subset = rows[:subset_size] if subset_size > 0 else rows
                 enable_thinking = (
                     config.get_str("train.thinking") == "on"
                     if "thinking" in config.section("train")
                     else False
                 )
 
-                predictions: list[str] = []
+                all_prompts: list[str] = []
                 references: list[str] = []
-                sample_logs: list[dict[str, str]] = []
-
                 for row in eval_subset:
                     raw_input = row.get("input") or row.get("text") or ""
                     gold = (
@@ -209,6 +207,7 @@ def build_correction_eval_callback(
                         or row.get("correction")
                         or ""
                     ).strip()
+                    references.append(gold)
                     messages = render_corrector_prompt(raw_input)
                     try:
                         prompt_text = tokenizer.apply_chat_template(
@@ -221,36 +220,48 @@ def build_correction_eval_callback(
                         prompt_text = tokenizer.apply_chat_template(
                             messages, tokenize=False, add_generation_prompt=True
                         )
-                    inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
+                    all_prompts.append(prompt_text)
+
+                orig_padding_side = tokenizer.padding_side
+                tokenizer.padding_side = "left"
+                if tokenizer.pad_token is None:
+                    tokenizer.pad_token = tokenizer.eos_token
+
+                eval_batch_size = 32 if torch.cuda.is_available() else 8
+                predictions: list[str] = []
+                for i in range(0, len(all_prompts), eval_batch_size):
+                    batch_prompts = all_prompts[i : i + eval_batch_size]
+                    batch_inputs = tokenizer(
+                        batch_prompts,
+                        return_tensors="pt",
+                        padding=True,
+                        truncation=True,
+                        max_length=config.get_int("train.max_seq_len"),
+                    ).to(device)
 
                     with torch.no_grad():
-                        outputs = model.generate(
-                            **inputs,
+                        batch_outputs = model.generate(
+                            **batch_inputs,
                             max_new_tokens=128,
                             do_sample=False,
-                            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                            pad_token_id=tokenizer.pad_token_id,
                         )
-                    generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
-                    prediction = tokenizer.decode(
-                        generated_ids, skip_special_tokens=True
-                    ).strip()
+                    prompt_len = batch_inputs["input_ids"].shape[1]
+                    for out_seq in batch_outputs:
+                        gen_ids = out_seq[prompt_len:]
+                        pred_text = tokenizer.decode(
+                            gen_ids, skip_special_tokens=True
+                        ).strip()
+                        predictions.append(pred_text)
 
-                    predictions.append(prediction)
-                    references.append(gold)
-                    if len(sample_logs) < 3:
-                        sample_logs.append({
-                            "input": raw_input,
-                            "prediction": prediction,
-                            "gold": gold,
-                            "exact": str(bool(prediction == gold)),
-                        })
+                tokenizer.padding_side = orig_padding_side
 
                 metrics = evaluate_correction_pairs(predictions, references)
                 val_metrics = {f"val/{k}": v for k, v in metrics.items()}
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
 
-                # Log qualitative samples with inline visual diff to W&B
+                # Log qualitative samples with inline visual diff to W&B (exactly 8 samples)
                 from lexi_research.tracking.panels import log_correction_samples
 
                 sample_records = [
@@ -262,20 +273,22 @@ def build_correction_eval_callback(
                     }
                     for row, p, g in zip(eval_subset, predictions, references)
                 ]
-                log_correction_samples(run, sample_records, step=step)
+                log_correction_samples(run, sample_records, step=step, limit=8)
 
                 print(
-                    f"\n[Correction Eval @ Step {step}] Exact Match: {metrics['correction.exact_match']:.1%} │ "
+                    f"\n[Correction Eval @ Step {step} over {len(eval_subset)} samples] "
+                    f"Exact Match: {metrics['correction.exact_match']:.1%} │ "
                     f"Char Sim: {metrics['correction.char_similarity']:.1%} │ "
                     f"Span F1: {metrics['correction.span_only_f1']:.1%}",
                     flush=True,
                 )
-                if sample_logs:
-                    sample = sample_logs[0]
+                for idx in range(min(3, len(sample_records))):
+                    sample = sample_records[idx]
+                    status = "✓ EXACT" if sample["exact"] else "✗ DIFF"
                     print(
-                        f"  ├ Input:  {sample['input'][:70]}\n"
-                        f"  ├ Pred:   {sample['prediction'][:70]}\n"
-                        f"  └ Gold:   {sample['gold'][:70]} (Exact: {sample['exact']})",
+                        f"  [{status}] In:   {sample['input']}\n"
+                        f"         Pred: {sample['prediction']}\n"
+                        f"         Gold: {sample['gold']}",
                         flush=True,
                     )
                 return val_metrics
