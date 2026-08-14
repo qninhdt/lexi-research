@@ -173,6 +173,8 @@ train:
   eval_steps: 100
   # Batch size used during in-loop validation loss computation and generation.
   eval_batch_size: 32
+  # Max tokens generated per sequence during in-loop validation.
+  max_new_tokens: 256
   # Rows scored in loop. 0 evaluates the entire validation set.
   eval_subset: 0
   gradient_checkpointing: false

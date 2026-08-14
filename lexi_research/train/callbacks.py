@@ -325,10 +325,15 @@ def build_correction_eval_callback(
                                 max_length=config.get_int("train.max_seq_len"),
                             ).to(device)
 
+                            gen_max_tokens = (
+                                config.get_int("train.max_new_tokens")
+                                if "max_new_tokens" in config.section("train")
+                                else 256
+                            )
                             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_cuda_autocast):
                                 batch_outputs = model.generate(
                                     **batch_inputs,
-                                    max_new_tokens=128,
+                                    max_new_tokens=gen_max_tokens,
                                     do_sample=False,
                                     use_cache=True,
                                     pad_token_id=tokenizer.pad_token_id,
