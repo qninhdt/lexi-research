@@ -247,7 +247,7 @@ def _train_once(
 
     run_config = config.with_overrides([f"tracking.group={group}"]) if group else config
     lineage = collect(run_config.as_dict(), stage=stage)
-    allow_resume = bool(args.resume != "none")
+    allow_resume = str(args.resume or "").strip().lower() not in ("none", "false", "off", "no", "0", "null")
     run = start(
         run_config,
         stage=stage,
@@ -636,7 +636,13 @@ def build_parser() -> argparse.ArgumentParser:
     sft.add_argument("--band-config", default="band_config.json")
     sft.add_argument("--val", default=None, help="rows for in-loop evaluation")
     sft.add_argument("--ceiling", default=None, help="teacher self-consistency artifact")
-    sft.add_argument("--resume", default="auto", help="`auto`, `none`, or a checkpoint directory")
+    sft.add_argument(
+        "--resume",
+        default="auto",
+        nargs="?",
+        const="auto",
+        help="`auto`, `none`, or a checkpoint directory",
+    )
     sft.set_defaults(handler=_handle_train_sft)
 
     sweep = train.add_parser("sweep", parents=[common], help="run every arm of an ablation")
@@ -647,7 +653,7 @@ def build_parser() -> argparse.ArgumentParser:
     sweep.add_argument("--band-config", default="band_config.json")
     sweep.add_argument("--val", default=None)
     sweep.add_argument("--ceiling", default=None)
-    sweep.add_argument("--resume", default="auto")
+    sweep.add_argument("--resume", default="auto", nargs="?", const="auto")
     sweep.add_argument(
         "--restart", action="store_true", help="re-run arms already recorded as complete"
     )

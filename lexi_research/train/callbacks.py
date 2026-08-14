@@ -50,14 +50,23 @@ def resolve_resume(output_dir: str | Path, resume: str | None) -> str | None:
     `auto` on an empty directory returns None rather than raising: the first run
     of a sweep arm has nothing to resume from, and that is not an error.
     """
-    if resume is None or resume == "none":
+    if resume is None:
         return None
-    if resume == "auto":
+    r_str = str(resume).strip().lower()
+    if r_str in ("none", "false", "off", "no", "0", "null"):
+        return None
+    if r_str in ("auto", "true", "yes", "on", "1", "latest", "resume"):
         found = latest_checkpoint(output_dir)
         return str(found) if found else None
+
     path = Path(resume)
     if not path.exists():
-        raise FileNotFoundError(f"checkpoint {path} does not exist")
+        rel_candidate = Path(output_dir) / resume
+        if rel_candidate.exists():
+            return str(rel_candidate)
+        raise FileNotFoundError(
+            f"Checkpoint {path} does not exist (also checked in {output_dir})"
+        )
     return str(path)
 
 
