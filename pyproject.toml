@@ -21,6 +21,23 @@ dependencies = [
     "uvicorn>=0.30",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "accelerate>=1.0",
+    "bitsandbytes>=0.45",
+    "causal-conv1d>=1.6.0",
+    "datasets>=3",
+    "flash-linear-attention",
+    "ninja",
+    "packaging",
+    "peft>=0.14",
+    "psutil",
+    "torch>=2.4",
+    "transformers>=4.48",
+    "trl>=0.12",
+    "wandb",
+]
+
 [project.scripts]
 lexi = "lexi_research.cli:main"
 
