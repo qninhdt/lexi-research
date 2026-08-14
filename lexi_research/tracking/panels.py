@@ -105,40 +105,57 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
 
     import difflib
     import html
+    import re
 
-    p_words = p_str.split()
-    g_words = g_str.split()
-    matcher = difflib.SequenceMatcher(None, g_words, p_words)
+    # Tokenize preserving spaces, tags [A>B:tag], and words
+    p_tokens = [t for t in re.split(r"(\[[^\]]+\]|\s+)", p_str) if t]
+    g_tokens = [t for t in re.split(r"(\[[^\]]+\]|\s+)", g_str) if t]
+
+    matcher = difflib.SequenceMatcher(None, g_tokens, p_tokens)
 
     pred_parts = []
     gold_parts = []
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        g_seg = html.escape(" ".join(g_words[i1:i2]))
-        p_seg = html.escape(" ".join(p_words[j1:j2]))
+        g_chunk = "".join(g_tokens[i1:i2])
+        p_chunk = "".join(p_tokens[j1:j2])
+
         if tag == "equal":
-            pred_parts.append(p_seg)
-            gold_parts.append(g_seg)
+            # If the matching chunk is a tag [A>B:tag], highlight in GREEN!
+            # If regular unchanged text, leave uncolored.
+            for tok in p_tokens[j1:j2]:
+                if tok.startswith("[") and tok.endswith("]"):
+                    pred_parts.append(
+                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(tok)}</span>'
+                    )
+                    gold_parts.append(
+                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(tok)}</span>'
+                    )
+                else:
+                    pred_parts.append(html.escape(tok))
+                    gold_parts.append(html.escape(tok))
         elif tag == "replace":
-            gold_parts.append(
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{g_seg}</span>'
-            )
+            # Mismatch: Pred generated wrong tag/text -> RED
+            # Gold expected target -> RED
             pred_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{p_seg}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
+            )
+            gold_parts.append(
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(g_chunk)}</span>'
             )
         elif tag == "delete":
             # Present in Gold, missing in Pred
             gold_parts.append(
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;">{g_seg}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 4px;border-radius:3px;">{html.escape(g_chunk)}</span>'
             )
         elif tag == "insert":
             # Hallucinated / extra in Pred, not in Gold
             pred_parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{p_seg}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;font-weight:700;text-decoration:underline;padding:1px 4px;border-radius:3px;">{html.escape(p_chunk)}</span>'
             )
 
-    p_html = " ".join(pred_parts)
-    g_html = " ".join(gold_parts)
+    p_html = "".join(pred_parts)
+    g_html = "".join(gold_parts)
 
     return (
         '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px;line-height:1.6;">'
