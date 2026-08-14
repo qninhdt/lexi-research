@@ -25,5 +25,3 @@ uvicorn
 flash-linear-attention
 flash-attn
 liger-kernel
-# Install current package in editable mode
--e .
