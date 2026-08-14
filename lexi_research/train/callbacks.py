@@ -169,7 +169,6 @@ def build_correction_eval_callback(
     import torch
     import transformers
 
-    from lexi_research.eval.correction import evaluate_correction_pairs
     from lexi_research.train.corrector_prompt import render_corrector_prompt
 
     def _select_hardest_indices(source_rows: Sequence[Mapping[str, Any]], k: int = 16) -> list[int]:

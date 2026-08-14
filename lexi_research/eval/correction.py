@@ -148,30 +148,7 @@ def tag_distribution(corrections: Iterable[str | None]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def evaluate_correction_pairs(
-    predictions: Sequence[str | None],
-    references: Sequence[str | None],
-    config: BandConfig | None = None,
-) -> dict[str, float]:
-    """Unified evaluation metrics for correction across both Stage 1 and Stage 2."""
-    import difflib
 
-    exact_count = 0
-    sim_scores: list[float] = []
-    for pred, gold in zip(predictions, references):
-        p_str = (pred or "").strip()
-        g_str = (gold or "").strip()
-        exact_count += int(p_str == g_str)
-        sim_scores.append(difflib.SequenceMatcher(None, p_str, g_str).ratio())
-
-    total = len(predictions) or 1
-    scores = correction_scores(predictions, references)
-    return {
-        "correction.exact_match": exact_count / total,
-        "correction.char_similarity": sum(sim_scores) / total if sim_scores else 0.0,
-        "correction.span_only_f1": _prf(scores.span_matched, scores.predicted, scores.gold)[2],
-        "correction.span_tag_f1": _prf(scores.span_tag_matched, scores.predicted, scores.gold)[2],
-    }
 
 
 def compute_f_beta(matched: int, predicted: int, gold: int, beta: float = 0.5) -> tuple[float, float, float]:
@@ -305,7 +282,6 @@ __all__ = [
     "compute_f_beta",
     "correction_scores",
     "edit_triples",
-    "evaluate_correction_pairs",
     "evaluate_span_predictions",
     "other_rate",
     "tag_distribution",
