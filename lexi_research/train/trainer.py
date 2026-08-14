@@ -78,7 +78,6 @@ def build_examples(
     thinking: str,
     completion_only: bool,
     task: str = "grader",
-    rubric: str = "full",
     max_drop_fraction: float = 0.02,
 ) -> tuple[list[Example], int]:
     """Tokenise every row, dropping and counting the ones that do not fit.
@@ -108,7 +107,6 @@ def build_examples(
                         row,
                         thinking=thinking,
                         max_seq_len=max_seq_len,
-                        rubric=rubric,
                     )
                 )
                 continue
@@ -275,46 +273,6 @@ def collate_batch(batch: Sequence[Example], pad_token_id: int) -> dict[str, Any]
     }
 
 
-def _completion_logit_start(labels: Any) -> int:
-    """Return the first logit position needed for completion-only CE."""
-    import torch
-
-    supervised = labels.ne(IGNORE_INDEX)
-    if not bool(supervised.any()):
-        raise TrainerSetupError("the batch contains no supervised completion tokens")
-    first_label = int(torch.nonzero(supervised, as_tuple=False)[:, 1].min().item())
-    # Position p predicts token p + 1, so retain the logit immediately before
-    # the first supervised label as well.
-    return max(first_label - 1, 0)
-
-
-def completion_only_loss(logits: Any, labels: Any, logit_start: int) -> Any:
-    """Compute the same shifted CE as a causal LM, over the answer only.
-
-    ``logits`` may already be sliced by a model's ``logits_to_keep`` argument,
-    or may still cover the complete sequence for older model classes. Keeping
-    this calculation separate makes the exact-loss invariant testable without a
-    GPU or a downloaded checkpoint.
-    """
-    import torch.nn.functional as F
-
-    width = int(labels.shape[1])
-    expected = width - logit_start
-    if logits.shape[1] > expected:
-        logits = logits[:, logit_start:width]
-    if logits.shape[1] != expected:
-        raise TrainerSetupError(
-            f"model returned {logits.shape[1]} logits for a {expected}-token loss window"
-        )
-    shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = labels[:, logit_start + 1 :].contiguous()
-    return F.cross_entropy(
-        shift_logits.reshape(-1, shift_logits.shape[-1]),
-        shift_labels.reshape(-1),
-        ignore_index=IGNORE_INDEX,
-    )
-
-
 def _set_use_cache(model: Any, enabled: bool) -> None:
     """Set cache policy on both wrapper and nested text configs when present."""
     candidates = [getattr(model, "config", None)]
@@ -353,62 +311,28 @@ class _ExampleDataset:
         return iter(self._examples)
 
 
-def _selective_logits_trainer_class(transformers: Any) -> Any:
-    """Build a Trainer that uses ``logits_to_keep`` when the model supports it."""
+def _trainer_class(transformers: Any) -> Any:
+    """Build a Trainer that supports length-grouped sampling over Example dataclass."""
 
-    class SelectiveLogitsTrainer(transformers.Trainer):  # type: ignore[misc]
-        """Exact completion-only CE with a smaller vocabulary projection."""
+    class LexiTrainer(transformers.Trainer):  # type: ignore[misc]
+        def _get_train_sampler(self, train_dataset: Any = None) -> Any:
+            if getattr(self.args, "train_sampling_strategy", None) == "group_by_length":
+                dataset = train_dataset if train_dataset is not None else self.train_dataset
+                lengths = [len(e.input_ids) for e in dataset]
+                return transformers.trainer_pt_utils.LengthGroupedSampler(
+                    self.args.train_batch_size * self.args.gradient_accumulation_steps,
+                    dataset=dataset,
+                    lengths=lengths,
+                )
+            return super()._get_train_sampler(train_dataset)
 
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            super().__init__(*args, **kwargs)
-            # The custom loss already averages over valid completion tokens;
-            # do not let Trainer add its optional item-count scaling.
-            self.model_accepts_loss_kwargs = False
-
-        def compute_loss(
-            self,
-            model: Any,
-            inputs: dict[str, Any],
-            return_outputs: bool = False,
-            num_items_in_batch: Any | None = None,
-        ) -> Any:
-            del num_items_in_batch
-            labels = inputs.pop("labels")
-            logit_start = _completion_logit_start(labels)
-            keep = int(labels.shape[1]) - logit_start
-            try:
-                outputs = model(**inputs, logits_to_keep=keep)
-            except TypeError as exc:
-                if "logits_to_keep" not in str(exc):
-                    raise
-                # Older causal-LM classes do not expose the optional argument;
-                # their full-logit result still follows the exact same loss path.
-                outputs = model(**inputs)
-            logits = outputs.logits if hasattr(outputs, "logits") else outputs["logits"]
-            loss = completion_only_loss(logits, labels, logit_start)
-            return (loss, outputs) if return_outputs else loss
-
-    return SelectiveLogitsTrainer
+    return LexiTrainer
 
 
-def _check_loss_path_conflict(config: Config) -> None:
-    """Refuse settings where two features would both own the loss.
-
-    Liger replaces the model's own loss with a fused chunked cross-entropy,
-    while this trainer computes completion-only CE itself over a
-    ``logits_to_keep`` window. Enabling both leaves which one wins up to
-    Transformers' internals, and the failure mode is a quietly different
-    objective rather than an error — so it is checked before anything is loaded
-    rather than discovered from a loss curve.
-    """
+def _check_liger_configuration(config: Config) -> None:
+    """Verify Liger Kernel is installed when requested."""
     if not config.get_bool("train.use_liger_kernel"):
         return
-    if config.get_bool("train.selective_logits"):
-        raise TrainerSetupError(
-            "train.use_liger_kernel and train.selective_logits both replace the loss "
-            "path; Liger's fused cross-entropy would bypass the completion-only "
-            "window. Disable one of them."
-        )
     try:
         import liger_kernel  # noqa: F401
     except ImportError as exc:
@@ -488,7 +412,7 @@ def train_sft(
         ) from exc
 
     transformers.set_seed(config.get_int("train.seed"))
-    _check_loss_path_conflict(config)
+    _check_liger_configuration(config)
 
     if model is None or tokenizer is None:
         model, tokenizer = load_model_and_tokenizer(
@@ -507,7 +431,6 @@ def train_sft(
         thinking=config.get_str("train.thinking"),
         completion_only=config.get_bool("train.completion_only"),
         task=config.get_str("train.task"),
-        rubric=config.get_str("train.rubric"),
         max_drop_fraction=config.get_float("train.max_drop_fraction"),
     )
     supervised = sum(example.supervised_tokens for example in examples)
@@ -559,16 +482,15 @@ def train_sft(
             config.get_bool("train.dataloader_persistent_workers") and dataloader_workers > 0
         ),
         dataloader_prefetch_factor=(dataloader_prefetch if dataloader_workers > 0 else None),
+        train_sampling_strategy=(
+            "group_by_length" if config.get_bool("train.group_by_length") else "random"
+        ),
         seed=config.get_int("train.seed"),
         bf16=bf16,
         report_to=["wandb"] if getattr(run, "active", False) else [],
     )
     pad_token_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
-    trainer_class = (
-        _selective_logits_trainer_class(transformers)
-        if config.get_bool("train.selective_logits")
-        else transformers.Trainer
-    )
+    trainer_class = _trainer_class(transformers)
     trainer = trainer_class(
         model=model,
         args=arguments,

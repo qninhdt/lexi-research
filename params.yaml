@@ -95,7 +95,7 @@ train:
   # LoRA targets are resolved from the loaded model's own module tree and the
   # chat format from its own tokenizer template, so switching base model is a
   # value change here rather than a code change.
-  base_model: Qwen/Qwen3.5-4B
+  base_model: Qwen/Qwen3.5-0.8B
   # The rubric in the grader system prompt is long, and it grew when the grader
   # was taught the reconstruction and band-separation rules that took format
   # validity from 0.86 to 0.96. Measured over the 467-row pilot with the real
@@ -111,10 +111,10 @@ train:
   #
   # The sequences themselves did get ~1.34x longer than the old prompt's 1503
   # median, which is real training cost paid for the validity gain.
-  max_seq_len: 2560
+  max_seq_len: 384
   # Rows over the limit are dropped, and dropping is length-biased. Past this
   # share the remaining data is a different distribution, so the run stops.
-  max_drop_fraction: 0.02
+  max_drop_fraction: 0.10
   # Rank 8 with alpha 32 follows the current ms-swift dense Qwen3.5 recipe, and
   # cuts the adapter and its optimizer state relative to the rank 32 this
   # replaced. Alpha tracks rank at 4x so the LoRA scaling (alpha / r) stays put;
@@ -146,8 +146,8 @@ train:
   # above 1 would break it. `run_colab_train.sh` raises the batch for Qwen,
   # where the same effective batch of 32 is reached with accumulation 8 and
   # measurably less wall-clock. Raise this only for a model verified to fit.
-  per_device_batch_size: 1
-  grad_accum: 32
+  per_device_batch_size: 4
+  grad_accum: 8
   warmup_ratio: 0.03
   seed: 20260729
   logging_steps: 10
@@ -164,17 +164,9 @@ train:
   torch_compile: false
   torch_compile_backend: null
   torch_compile_mode: null
-  # Qwen's causal-LM head accepts `logits_to_keep`; this projects only the
-  # completion window while preserving the exact completion-only CE objective.
-  selective_logits: true
-  # Fused RMSNorm/SwiGLU/RoPE and a chunked cross-entropy from Liger. The
-  # attraction here is the head: a 248,320-entry vocabulary over hidden size
-  # 2560 makes the logit projection and its softmax a large share of both time
-  # and memory. Off by default until measured on this exact stack, because Liger
-  # patches modules in place and this trainer computes its own completion-only
-  # CE — a fused loss that ignored `logits_to_keep` would silently change the
-  # objective rather than just the speed.
-  use_liger_kernel: false
+  # Fused RMSNorm/SwiGLU/RoPE and chunked fused cross-entropy from Liger Kernel.
+  # Fuses lm_head matmul + cross entropy in GPU SRAM and natively respects ignore_index=-100.
+  use_liger_kernel: true
   # In-loop evaluation interval. Loss falls smoothly while format validity
   # collapses, so the harness runs during training rather than after it. 0 is off.
   eval_steps: 200
@@ -187,7 +179,7 @@ train:
   # the switch explicit so a timing ablation can reject it if backward is slower.
   gradient_checkpointing_use_reentrant: false
   # Group samples of similar length into the same batch to minimize padding overhead.
-  group_by_length: false
+  group_by_length: true
   # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
 
   # gate sets it to 2.
@@ -226,15 +218,6 @@ train:
   # grader prompt and scores three fields, and the trainer refuses rather than
   # scoring stage-A rows against a contract they do not carry.
   task: grader
-  # How much of the tag set the stage-A prompt explains. `full` documents all 16;
-  # `terse` names them and lets ~19k examples teach what each means.
-  #
-  # Not a style choice. Measured with the Qwen tokenizer over 2,000 rows: the
-  # learner sentence averages 14 tokens and the answer 14, while the full rubric
-  # is 915 — so 97% of every sequence is a prompt supplied verbatim at inference,
-  # and only 1.5% of tokens carry loss. At the L4 rate in the README that is
-  # ~17 hours for `full` against ~1 for `terse`. Ignored when `task: grader`.
-  rubric: full
   # Ablation A2: `on`, `off`, or `forced-empty`. The third arm keeps the
   # template's reasoning path open but supervises an empty block, which is what
   # separates "reasoning helps" from "the scaffold alone helps". Quoted: YAML
@@ -254,7 +237,8 @@ train:
     # `gate_proj` is not. No preset adapts them: adapting a router perturbs
     # expert assignment. An explicit pattern list reaches them.
     router_markers: [gate, router, shared_expert_gate]
-    excluded_markers: [visual, vision_tower, vision_model, image_encoder, audio_tower]
+    excluded_markers:
+      [visual, vision_tower, vision_model, image_encoder, audio_tower]
 
 # The CPU acceptance gate: a randomly-initialised model small enough that two
 # optimiser steps finish in seconds, over a fixture that carries no

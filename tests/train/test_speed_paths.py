@@ -2,32 +2,14 @@
 
 from __future__ import annotations
 
-import torch
+import pytest
 
 from lexi_research.train.trainer import (
-    _completion_logit_start,
+    _check_liger_configuration,
     _drop_unused_multimodal_towers,
-    completion_only_loss,
     load_model_and_tokenizer,
+    TrainerSetupError,
 )
-
-
-def test_selective_logits_has_the_same_completion_loss_as_full_logits() -> None:
-    torch.manual_seed(7)
-    logits = torch.randn(2, 7, 11)
-    labels = torch.tensor(
-        [
-            [-100, -100, 3, 4, 5, -100, -100],
-            [-100, -100, -100, 2, 1, 0, -100],
-        ]
-    )
-    start = _completion_logit_start(labels)
-
-    full = completion_only_loss(logits, labels, start)
-    selected = completion_only_loss(logits[:, start:], labels, start)
-
-    assert start == 1
-    assert torch.equal(full, selected)
 
 
 def test_model_loader_selects_sdpa_when_the_declared_class_supports_it(monkeypatch) -> None:
@@ -141,43 +123,20 @@ def test_text_only_loader_drops_media_towers_without_touching_language_model() -
     )
 
 
-def test_liger_and_selective_logits_together_are_refused(tmp_path) -> None:
-    """Both replace the loss, and a silent winner would change the objective."""
-    import json
-
-    import pytest
-
+def test_liger_configuration_validates_installation(monkeypatch) -> None:
     from lexi_research.cli.config import load_config
-    from lexi_research.train.trainer import TrainerSetupError, train_sft
 
-    rows = tmp_path / "rows.jsonl"
-    rows.write_text(
-        json.dumps(
-            {
-                "target": "bright",
-                "definition": "full of light",
-                "pos": "adjective",
-                "text": "The room is bright.",
-                "correction": "The room is bright.",
-                "meaning": 4,
-                "feedback": "Good.",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    config = load_config(
-        overrides=[
-            "train.use_liger_kernel=true",
-            "train.selective_logits=true",
-        ]
-    )
+    config = load_config(overrides=["train.use_liger_kernel=true"])
+    # With liger_kernel installed in the env, this should succeed without raising
+    _check_liger_configuration(config)
 
-    with pytest.raises(TrainerSetupError, match="both replace the"):
-        train_sft(
-            config,
-            train_path=rows,
-            output_dir=tmp_path / "out",
-            model=object(),
-            tokenizer=object(),
-        )
+    # When liger_kernel is missing, it must raise TrainerSetupError
+    monkeypatch.setattr(
+        "builtins.__import__",
+        lambda name, *args, **kwargs: (
+            (_ for _ in ()).throw(ImportError("no liger")) if name == "liger_kernel"
+            else __import__(name, *args, **kwargs)
+        ),
+    )
+    with pytest.raises(TrainerSetupError, match="liger-kernel is not installed"):
+        _check_liger_configuration(config)

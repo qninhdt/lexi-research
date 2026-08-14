@@ -1,0 +1,2 @@
+# Refer to requirements-colab.txt for GPU/training dependencies
+-r requirements-colab.txt

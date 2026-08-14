@@ -22,13 +22,11 @@ openai
 httpx
 fastapi
 uvicorn
-# Fused CUDA kernels for Qwen3.5's GatedDeltaNet linear attention layers.
-# Installed separately in run_colab_train.sh with --no-build-isolation so they
-# compile against the VM's existing PyTorch/CUDA rather than downloading their own.
-# Without these the model falls back to torch_chunk_gated_delta_rule which
-# casts all tensors to FP32, consuming ~12 GiB extra activation memory.
-# Rust-backed parallel downloader for the Hub.
+causal-conv1d>=1.6.0
+flash-linear-attention
+liger-kernel
 # Install current package in editable mode
 -e .
+
 
 

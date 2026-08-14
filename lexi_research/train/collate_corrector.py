@@ -41,11 +41,9 @@ from .collate import (
 from .corrector_prompt import render_corrector_prompt
 
 
-def corrector_messages(
-    row: Mapping[str, Any], *, nonce: str | None = None, rubric: str = "full"
-) -> list[ChatMsg]:
+def corrector_messages(row: Mapping[str, Any]) -> list[ChatMsg]:
     """The stage-A prompt for one row."""
-    return render_corrector_prompt(str(row["text"]), nonce=nonce, rubric=rubric)
+    return render_corrector_prompt(str(row["text"]))
 
 
 def corrector_answer(row: Mapping[str, Any]) -> str:
@@ -76,8 +74,6 @@ def build_corrector_example(
     *,
     thinking: str = "off",
     max_seq_len: int | None = None,
-    nonce: str | None = None,
-    rubric: str = "full",
 ) -> Example:
     """Tokenise one stage-A row into `input_ids` plus a completion-masked `labels`.
 
@@ -85,13 +81,8 @@ def build_corrector_example(
     learn: the answer is a mechanical re-emission of the input with markup, and a
     reasoning block would be tokens spent on every one of ~20k rows for a step the
     task does not contain.
-
-    There is no `completion_only=False` arm. That arm exists in stage B to measure
-    what supervising the prompt costs; the answer here is already the majority of
-    a much shorter sequence, so the same ablation would be measuring something
-    else under the same name.
     """
-    messages = corrector_messages(row, nonce=nonce, rubric=rubric)
+    messages = corrector_messages(row)
     enable_thinking = thinking != "off"
     answer = _supervised_text(row, thinking)
 

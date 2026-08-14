@@ -14,6 +14,7 @@ dependencies = [
     "jinja2>=3.1",
     "json-repair>=0.63.1",
     "langchain-openai>=0.3",
+    "liger-kernel>=0.8.1",
     "pyarrow>=17",
     "pydantic>=2.9",
     "pyyaml>=6",
@@ -69,10 +70,6 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-# Percent-format notebook source: it carries IPython `!` and `%` magics, so it is
-# not valid Python and is checked by `tests/ops/test_notebook_contract.py`
-# instead.
-extend-exclude = ["notebooks/lexi_colab.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -98,9 +95,11 @@ module = [
     "accelerate.*",
     "bitsandbytes.*",
     "datasets.*",
+    "liger_kernel.*",
     "peft.*",
     "tokenizers.*",
     "torch.*",
+    "tqdm.*",
     "transformers.*",
     "trl.*",
     "wandb.*",
