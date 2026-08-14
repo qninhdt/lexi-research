@@ -91,7 +91,16 @@ def _coerce(text: str, current: Any, path: str) -> Any:
     raise ConfigError(f"{path} holds {type(current).__name__}, which cannot be overridden")
 
 
+_ALIASES = {
+    "train.eval_step": "train.eval_steps",
+    "train.save_step": "train.save_steps",
+    "train.logging_step": "train.logging_steps",
+    "train.epoch": "train.epochs",
+}
+
+
 def _apply(values: MutableMapping[str, Any], path: str, raw: str) -> None:
+    path = _ALIASES.get(path, path)
     segments = path.split(".")
     cursor: Any = values
     for segment in segments[:-1]:
@@ -112,6 +121,7 @@ class Config:
 
     def get(self, path: str) -> Any:
         """Value at a dotted key path. Raises rather than returning a default."""
+        path = _ALIASES.get(path, path)
         cursor: Any = self.values
         for segment in path.split("."):
             if not isinstance(cursor, Mapping) or segment not in cursor:
