@@ -354,28 +354,8 @@ def _check_liger_configuration(config: Config) -> None:
         ) from exc
 
 
-def _patch_peft_torchao_compatibility() -> None:
-    import sys
-
-    if "torchao" not in sys.modules:
-        try:
-            import importlib.util
-
-            if importlib.util.find_spec("torchao") is not None:
-                import torchao
-                import packaging.version
-
-                if packaging.version.parse(
-                    getattr(torchao, "__version__", "0.0.0")
-                ) < packaging.version.parse("0.16.0"):
-                    sys.modules["torchao"] = None
-        except Exception:
-            sys.modules["torchao"] = None
-
-
 def attach_adapter(model: Any, config: Config) -> tuple[TargetResolution, Any]:
     """Resolve LoRA targets against this model and return the wrapped model."""
-    _patch_peft_torchao_compatibility()
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     spec: str | Sequence[str] = config.get("train.target_modules")
