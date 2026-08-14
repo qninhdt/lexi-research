@@ -135,6 +135,105 @@ def build_eval_callback(
     return InLoopEval()
 
 
+def build_correction_eval_callback(
+    *,
+    config: Any,
+    run: Any,
+    tokenizer: Any,
+    rows: Sequence[Mapping[str, Any]],
+    every_steps: int,
+) -> Any:
+    """A `TrainerCallback` that evaluates Stage 1 Grammar Correction on a validation subset."""
+    import difflib
+    import torch
+    import transformers
+
+    from lexi_research.train.collate import render_corrector_prompt
+
+    class InLoopCorrectionEval(transformers.TrainerCallback):  # type: ignore[misc]
+        def __init__(self) -> None:
+            self.history: list[dict[str, float]] = []
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            step = int(state.global_step)
+            if every_steps <= 0 or step == 0 or step % every_steps:
+                return
+            model = kwargs.get("model")
+            if model is None:
+                return
+            self.run_once(model, step)
+
+        def run_once(self, model: Any, step: int) -> dict[str, float]:
+            was_training = model.training
+            model.eval()
+            try:
+                device = next(model.parameters()).device
+                exact_count = 0
+                similarities: list[float] = []
+                sample_logs: list[dict[str, str]] = []
+                subset_size = config.get_int("train.eval_subset")
+                eval_subset = rows[:subset_size] if subset_size > 0 else rows[:32]
+
+                for row in eval_subset:
+                    raw_input = row.get("input") or row.get("text") or ""
+                    gold = (row.get("output") or row.get("target") or row.get("correction") or "").strip()
+                    messages = [{"role": "user", "content": render_corrector_prompt(raw_input)}]
+                    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
+
+                    with torch.no_grad():
+                        outputs = model.generate(
+                            **inputs,
+                            max_new_tokens=128,
+                            do_sample=False,
+                            pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                        )
+                    generated_ids = outputs[0][inputs["input_ids"].shape[1] :]
+                    prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+                    is_exact = int(prediction == gold)
+                    exact_count += is_exact
+                    sim = difflib.SequenceMatcher(None, prediction, gold).ratio()
+                    similarities.append(sim)
+                    if len(sample_logs) < 3:
+                        sample_logs.append({
+                            "input": raw_input,
+                            "prediction": prediction,
+                            "gold": gold,
+                            "exact": str(bool(is_exact)),
+                        })
+
+                n = len(eval_subset) or 1
+                exact_rate = exact_count / n
+                avg_sim = sum(similarities) / n if similarities else 0.0
+
+                metrics = {
+                    "val/exact_match": exact_rate,
+                    "val/char_similarity": avg_sim,
+                }
+                run.log(metrics, step=step)
+                self.history.append({"step": float(step), **metrics})
+
+                print(
+                    f"\n[GEC Eval @ Step {step}] Exact Match: {exact_rate:.1%} │ Char Similarity: {avg_sim:.1%}",
+                    flush=True,
+                )
+                if sample_logs:
+                    sample = sample_logs[0]
+                    print(
+                        f"  ├ Input:  {sample['input'][:70]}\n"
+                        f"  ├ Pred:   {sample['prediction'][:70]}\n"
+                        f"  └ Gold:   {sample['gold'][:70]} (Exact: {sample['exact']})",
+                        flush=True,
+                    )
+                return metrics
+            finally:
+                if was_training:
+                    model.train()
+
+    return InLoopCorrectionEval()
+
+
 def build_progress_callback() -> Any:
 
     """A beautiful, rich progress and step callback for training logs."""

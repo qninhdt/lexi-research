@@ -517,20 +517,34 @@ def train_sft(
         eval_dataset=_ExampleDataset(val_examples) if val_examples else None,
         data_collator=lambda batch: collate_batch(batch, pad_token_id),
     )
-    if val_rows and config.get_str("train.task") == "grader":
-        from .callbacks import build_eval_callback
+    if val_rows:
+        task = config.get_str("train.task")
+        if task == "grader":
+            from .callbacks import build_eval_callback
 
-        trainer.add_callback(
-            build_eval_callback(
-                config=config,
-                run=run,
-                tokenizer=tokenizer,
-                rows=val_rows,
-                band_config=band_config,
-                ceiling=ceiling or {},
-                every_steps=eval_steps,
+            trainer.add_callback(
+                build_eval_callback(
+                    config=config,
+                    run=run,
+                    tokenizer=tokenizer,
+                    rows=val_rows,
+                    band_config=band_config,
+                    ceiling=ceiling or {},
+                    every_steps=eval_steps,
+                )
             )
-        )
+        elif task == "corrector":
+            from .callbacks import build_correction_eval_callback
+
+            trainer.add_callback(
+                build_correction_eval_callback(
+                    config=config,
+                    run=run,
+                    tokenizer=tokenizer,
+                    rows=val_rows,
+                    every_steps=eval_steps,
+                )
+            )
     trainer.add_callback(build_progress_callback())
 
     outcome = trainer.train(resume_from_checkpoint=resolve_resume(output_dir, resume))
