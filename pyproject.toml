@@ -56,15 +56,16 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [build-system]
-requires = ["uv_build>=0.10.7,<0.11.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.uv.build-backend]
-module-name = "lexi_research"
-module-root = ""
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lexi_research*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 
 [tool.ruff]
