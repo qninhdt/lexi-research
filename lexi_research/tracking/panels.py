@@ -112,18 +112,18 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
             parts.append(html.escape(p_chunk))
         elif op == "replace":
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">-{html.escape(p_chunk.strip())}</span>'
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">+{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">{html.escape(g_chunk.strip())}</span>'
             )
         elif op == "delete":
             # Extra in pred
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">-{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">{html.escape(p_chunk.strip())}</span>'
             )
         elif op == "insert":
             # Missing from pred, in gold
             parts.append(
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">+{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">{html.escape(g_chunk.strip())}</span>'
             )
 
     return (
@@ -133,7 +133,7 @@ def compute_html_diff(pred: str | None, gold: str | None) -> str:
     )
 
 
-CORRECTION_SAMPLE_COLUMNS = ("Diff (Git-style: -Prediction / +Gold)",)
+CORRECTION_SAMPLE_COLUMNS = ("Diff (Red: Prediction / Green: Gold)",)
 
 
 def log_correction_samples(
