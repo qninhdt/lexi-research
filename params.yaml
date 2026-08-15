@@ -283,6 +283,9 @@ tracking:
   entity: ""
   group: ""
   mode: online
+  # Set true to upload final checkpoints as WandB artifacts. Default is false
+  # because checkpoints are persisted directly to Google Drive / local disk.
+  log_artifacts: false
   # The adapter and band_config.json ship as one artifact under this name. A
   # checkpoint without the config that derives its bands is meaningless.
   adapter_artifact: lexi-grader-adapter

@@ -512,6 +512,12 @@ def train_sft(
     dataloader_prefetch = config.get_int("train.dataloader_prefetch_factor")
     eval_steps = config.get_int("train.eval_steps")
 
+    if getattr(run, "active", False):
+        import os
+
+        os.environ["WANDB_LOG_MODEL"] = "false"
+        os.environ["WANDB_WATCH"] = "false"
+
     arguments = transformers.TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=epochs,

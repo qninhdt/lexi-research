@@ -269,11 +269,12 @@ def _train_once(
         )
         # The adapter and the band config version together: a checkpoint without
         # the config that derives its bands produces meaningless bands.
-        run.log_artifact(
-            config.get_str("tracking.adapter_artifact"),
-            [result.output_dir, args.band_config],
-            metadata={"lineage": lineage, "targets": result.targets.summary()},
-        )
+        if config.get_bool("tracking.log_artifacts") if "log_artifacts" in config.section("tracking") else False:
+            run.log_artifact(
+                config.get_str("tracking.adapter_artifact"),
+                [result.output_dir, args.band_config],
+                metadata={"lineage": lineage, "targets": result.targets.summary()},
+            )
         run.summary({"examples": result.examples, "dropped": result.dropped})
     finally:
         run.finish()
