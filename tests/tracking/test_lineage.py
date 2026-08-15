@@ -105,3 +105,34 @@ def test_the_repo_params_declare_tracking() -> None:
     assert config.get_str("tracking.mode") in wandb_run.MODES
     assert config.get_str("tracking.project")
     assert config.get_str("tracking.adapter_artifact")
+
+
+def test_build_run_name_scenarios(tmp_path) -> None:
+    from lexi_research.tracking.wandb_run import build_run_name
+
+    # 1. Explicit name argument takes absolute priority
+    cfg = _config(tmp_path, "disabled")
+    assert build_run_name(cfg, "sft", explicit_name="my_run") == "my_run"
+
+    # 2. Output directory name is used when non-generic
+    assert build_run_name(cfg, "sft", output_dir="/path/to/stage1_qwen08b_span") == "stage1_qwen08b_span"
+
+    # 3. Generic output dir falls back to synthesized auto name
+    auto = build_run_name(cfg, "sft", output_dir="/tmp/scratch")
+    assert auto.startswith("sft-r32-")
+
+    # 4. Config tracking.name override
+    p = tmp_path / "custom.yaml"
+    p.write_text(
+        """
+tracking:
+  name: my_custom_exp
+  mode: disabled
+train:
+  lora_r: 16
+""",
+        encoding="utf-8",
+    )
+    custom_cfg = load_config(p)
+    assert build_run_name(custom_cfg, "sft") == "my_custom_exp"
+

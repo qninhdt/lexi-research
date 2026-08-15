@@ -168,6 +168,79 @@ def resolve_mode(config: Any) -> str:
     return mode
 
 
+def build_run_name(
+    config: Any,
+    stage: str,
+    output_dir: str | Path | None = None,
+    explicit_name: str | None = None,
+) -> str | None:
+    """Determine the WandB run name: explicit > output_dir name > synthesized auto name."""
+    if explicit_name and str(explicit_name).strip():
+        return str(explicit_name).strip()
+
+    # Check config for explicit name
+    cfg_name = None
+    try:
+        if hasattr(config, "section") and "tracking" in config.section("tracking"):
+            cfg_name = config.get("tracking.name") or config.get("tracking.run_name")
+        elif hasattr(config, "get"):
+            cfg_name = config.get("tracking.name") or config.get("tracking.run_name")
+    except Exception:
+        pass
+
+    if cfg_name and str(cfg_name).strip():
+        return str(cfg_name).strip()
+
+    auto_name = True
+    try:
+        if hasattr(config, "section") and "auto_name" in config.section("tracking"):
+            auto_name = config.get_bool("tracking.auto_name")
+        elif hasattr(config, "get"):
+            auto_val = config.get("tracking.auto_name")
+            if auto_val is not None:
+                auto_name = bool(auto_val)
+    except Exception:
+        pass
+
+    if not auto_name:
+        return None
+
+    # If output_dir is provided and has a specific folder name, use it
+    if output_dir:
+        out_name = Path(output_dir).name.strip()
+        if out_name and out_name not in (".", "", "scratch", "output", "outputs", "tmp"):
+            return out_name
+
+    # Synthesize clean auto name from stage and config
+    parts: list[str] = [stage]
+    try:
+        task = config.get("train.task")
+        if task:
+            parts.append(str(task))
+    except Exception:
+        pass
+
+    try:
+        base_model = config.get("train.base_model")
+        if base_model:
+            model_short = str(base_model).split("/")[-1].lower()
+            parts.append(model_short)
+    except Exception:
+        pass
+
+    try:
+        lora_r = config.get("train.lora_r")
+        if lora_r:
+            parts.append(f"r{lora_r}")
+    except Exception:
+        pass
+
+    import time
+
+    parts.append(time.strftime("%m%d-%H%M"))
+    return "-".join(parts)
+
+
 def start(
     config: Any,
     *,
@@ -175,6 +248,7 @@ def start(
     lineage: Mapping[str, Any],
     output_dir: str | Path | None = None,
     run_id: str | None = None,
+    name: str | None = None,
     allow_resume: bool = True,
 ) -> Run:
     """Open a run for `stage`, or a handle that records nothing."""
@@ -191,6 +265,7 @@ def start(
 
     tags = _build_tags(stage, lineage)
     notes = _build_notes(stage, lineage)
+    run_name = build_run_name(config, stage, output_dir=output_dir, explicit_name=name)
 
     # Persistent run_id for seamless W&B dashboard resuming across restarts
     if not run_id and output_dir:
@@ -219,6 +294,9 @@ def start(
         "notes": notes,
         "config": dict(lineage),
     }
+
+    if run_name:
+        init_kwargs["name"] = run_name
 
     if run_id:
         init_kwargs["id"] = run_id

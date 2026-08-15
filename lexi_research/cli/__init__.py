@@ -32,6 +32,13 @@ def _common_options() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--params", default=None, help="path to params.yaml")
     parser.add_argument(
+        "--name",
+        "--run-name",
+        dest="run_name",
+        default=None,
+        help="W&B run name override",
+    )
+    parser.add_argument(
         "--override",
         action="append",
         default=[],
@@ -46,11 +53,15 @@ def _common_options() -> argparse.ArgumentParser:
     return parser
 
 
-def _report(stage: str, config: Config, payload: dict[str, object]) -> int:
+def _report(
+    stage: str, config: Config, payload: dict[str, object], name: str | None = None
+) -> int:
     """Print a stage report and record it, with the lineage that dates it."""
     from lexi_research.tracking import collect, start
 
-    run = start(config, stage=stage, lineage=collect(config.as_dict(), stage=stage))
+    run = start(
+        config, stage=stage, lineage=collect(config.as_dict(), stage=stage), name=name
+    )
     run.summary(payload)
     run.finish()
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
@@ -207,7 +218,9 @@ def _handle_eval_score(config: Config, args: argparse.Namespace) -> int:
     )
     written = report.write(args.out)
 
-    run = start(config, stage="eval", lineage=lineage)
+    run = start(
+        config, stage="eval", lineage=lineage, name=getattr(args, "run_name", None)
+    )
     try:
         run.summary(report.flat())
         log_qualitative(run, rows)
@@ -253,6 +266,7 @@ def _train_once(
         stage=stage,
         lineage=lineage,
         output_dir=output_dir,
+        name=getattr(args, "run_name", None),
         allow_resume=allow_resume,
     )
 
@@ -335,7 +349,13 @@ def _handle_train_rl(config: Config, args: argparse.Namespace) -> int:
     run_config = config.with_overrides([f"rl.algo={args.algo}"]) if args.algo else config
     stage = f"rl-{run_config.get_str('rl.algo')}"
     lineage = collect(run_config.as_dict(), stage=stage)
-    run = start(run_config, stage=stage, lineage=lineage, output_dir=args.output)
+    run = start(
+        run_config,
+        stage=stage,
+        lineage=lineage,
+        output_dir=args.output,
+        name=getattr(args, "run_name", None),
+    )
 
     try:
         result = train_rl(
@@ -385,7 +405,12 @@ def _handle_bench_run(config: Config, args: argparse.Namespace) -> int:
         else [int(value) for value in config.get("bench.concurrency")]
     )
     lineage = collect(config.as_dict(), stage=f"bench-{name}")
-    run = start(config, stage=f"bench-{name}", lineage=lineage)
+    run = start(
+        config,
+        stage=f"bench-{name}",
+        lineage=lineage,
+        name=getattr(args, "run_name", None),
+    )
     results = []
     try:
         for level in levels:

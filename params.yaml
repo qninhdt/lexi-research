@@ -283,6 +283,9 @@ tracking:
   entity: ""
   group: ""
   mode: online
+  # Explicit run name. If empty and auto_name is true, a descriptive name is assigned automatically.
+  name: ""
+  auto_name: true
   # Set true to upload final checkpoints as WandB artifacts. Default is false
   # because checkpoints are persisted directly to Google Drive / local disk.
   log_artifacts: false
