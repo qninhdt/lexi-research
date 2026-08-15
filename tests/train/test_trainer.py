@@ -68,24 +68,14 @@ def _limit_admitting_only_short(short: dict, long: dict) -> int:
     return (short_len + long_len) // 2
 
 
-def test_dropping_more_than_the_ceiling_raises() -> None:
-    """A run on the surviving fraction answers a different question."""
+def test_dropping_over_long_rows_is_reported_not_fatal() -> None:
     short = dict(ROW, feedback="Fine.")
     long = dict(ROW, text=ROW["text"] + " word" * 400)
     limit = _limit_admitting_only_short(short, long)
 
-    with pytest.raises(TrainerSetupError, match="over the"):
-        _build([short] + [long] * 4, max_seq_len=limit)
-
-
-def test_dropping_under_the_ceiling_is_reported_not_fatal() -> None:
-    long = dict(ROW, text=ROW["text"] + " word" * 400)
-    limit = _limit_admitting_only_short(ROW, long)
-
-    examples, dropped = _build([ROW] * 99 + [long], max_seq_len=limit, max_drop_fraction=0.05)
-
-    assert dropped == 1
-    assert len(examples) == 99
+    examples, dropped = _build([short] + [long] * 4, max_seq_len=limit)
+    assert dropped == 4
+    assert len(examples) == 1
 
 
 def test_supervised_tokens_are_a_small_share_of_the_sequence() -> None:

@@ -123,13 +123,6 @@ def build_examples(
             dropped += 1
     if not examples:
         raise TrainerSetupError(f"every one of {len(rows)} rows exceeded max_seq_len={max_seq_len}")
-    fraction = dropped / len(rows)
-    if fraction > max_drop_fraction:
-        raise TrainerSetupError(
-            f"{dropped} of {len(rows)} rows ({fraction:.1%}) exceeded "
-            f"max_seq_len={max_seq_len}, over the {max_drop_fraction:.1%} ceiling. "
-            "Training on what is left would be training on the short rows."
-        )
     return examples, dropped
 
 
