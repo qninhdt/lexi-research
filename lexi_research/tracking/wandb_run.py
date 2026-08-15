@@ -168,50 +168,8 @@ def resolve_mode(config: Any) -> str:
     return mode
 
 
-def build_run_name(
-    config: Any,
-    stage: str,
-    output_dir: str | Path | None = None,
-    explicit_name: str | None = None,
-) -> str | None:
-    """Determine the WandB run name: explicit > output_dir name > synthesized auto name."""
-    if explicit_name and str(explicit_name).strip():
-        return str(explicit_name).strip()
-
-    # Check config for explicit name
-    cfg_name = None
-    try:
-        if hasattr(config, "section") and "tracking" in config.section("tracking"):
-            cfg_name = config.get("tracking.name") or config.get("tracking.run_name")
-        elif hasattr(config, "get"):
-            cfg_name = config.get("tracking.name") or config.get("tracking.run_name")
-    except Exception:
-        pass
-
-    if cfg_name and str(cfg_name).strip():
-        return str(cfg_name).strip()
-
-    auto_name = True
-    try:
-        if hasattr(config, "section") and "auto_name" in config.section("tracking"):
-            auto_name = config.get_bool("tracking.auto_name")
-        elif hasattr(config, "get"):
-            auto_val = config.get("tracking.auto_name")
-            if auto_val is not None:
-                auto_name = bool(auto_val)
-    except Exception:
-        pass
-
-    if not auto_name:
-        return None
-
-    # If output_dir is provided and has a specific folder name, use it
-    if output_dir:
-        out_name = Path(output_dir).name.strip()
-        if out_name and out_name not in (".", "", "scratch", "output", "outputs", "tmp"):
-            return out_name
-
-    # Synthesize clean auto name from stage and config
+def generate_auto_run_name(config: Any, stage: str) -> str:
+    """Synthesize a descriptive auto name for the run based on config and timestamp."""
     parts: list[str] = [stage]
     try:
         task = config.get("train.task")
@@ -239,6 +197,24 @@ def build_run_name(
 
     parts.append(time.strftime("%m%d-%H%M"))
     return "-".join(parts)
+
+
+def build_run_name(
+    config: Any,
+    stage: str,
+    output_dir: str | Path | None = None,
+    explicit_name: str | None = None,
+) -> str | None:
+    """Determine the WandB run name."""
+    if explicit_name and str(explicit_name).strip():
+        return str(explicit_name).strip()
+
+    if output_dir:
+        out_name = Path(output_dir).name.strip()
+        if out_name and out_name not in (".", "", "scratch", "output", "outputs", "tmp"):
+            return out_name
+
+    return generate_auto_run_name(config, stage)
 
 
 def start(

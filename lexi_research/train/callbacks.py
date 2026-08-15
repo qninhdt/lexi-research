@@ -60,14 +60,99 @@ def resolve_resume(output_dir: str | Path, resume: str | None) -> str | None:
         return str(found) if found else None
 
     path = Path(resume)
-    if not path.exists():
-        rel_candidate = Path(output_dir) / resume
-        if rel_candidate.exists():
-            return str(rel_candidate)
-        raise FileNotFoundError(
-            f"Checkpoint {path} does not exist (also checked in {output_dir})"
-        )
-    return str(path)
+    if path.exists():
+        if path.is_dir() and not _CHECKPOINT.match(path.name):
+            found = latest_checkpoint(path)
+            if found:
+                return str(found)
+        return str(path)
+
+    rel_candidate = Path(output_dir) / resume
+    if rel_candidate.exists():
+        if rel_candidate.is_dir() and not _CHECKPOINT.match(rel_candidate.name):
+            found = latest_checkpoint(rel_candidate)
+            if found:
+                return str(found)
+        return str(rel_candidate)
+
+    raise FileNotFoundError(
+        f"Checkpoint {path} does not exist (also checked in {output_dir})"
+    )
+
+
+def resolve_run_and_output_dir(
+    base_output_dir: str | Path,
+    resume: str | None,
+    config: Any,
+    stage: str,
+) -> tuple[Path, str, str | None]:
+    """Resolve (actual_output_dir, run_name, resume_checkpoint_path).
+
+    Cases:
+    1. If resume is explicitly a run_name or checkpoint path (not 'none' / 'auto'):
+       Look inside base_output_dir / resume or path as given.
+       Find the latest checkpoint inside that run directory.
+    2. If resume is 'auto' (or True / 'latest' / 'resume'):
+       Look for run subdirectories in base_output_dir or checkpoints.
+       If found, resume the newest run.
+       If nothing found, start a new run with auto-generated name.
+    3. If resume is 'none' (or False / None):
+       Create a new subfolder in base_output_dir using auto_name.
+    """
+    from lexi_research.tracking.wandb_run import generate_auto_run_name
+
+    base_path = Path(base_output_dir)
+    r_str = str(resume or "").strip().lower()
+
+    # Case 1: Fresh run (resume is None or 'none' / 'false' / 'off' / 'null')
+    if not resume or r_str in ("none", "false", "off", "no", "0", "null"):
+        auto_name = generate_auto_run_name(config, stage)
+        actual_output = base_path / auto_name
+        return actual_output, auto_name, None
+
+    # Case 2: Resume auto / latest
+    if r_str in ("auto", "true", "yes", "on", "1", "latest", "resume"):
+        direct_chk = latest_checkpoint(base_path)
+        if direct_chk:
+            return base_path, base_path.name, str(direct_chk)
+
+        if base_path.is_dir():
+            run_candidates: list[tuple[float, Path]] = []
+            for child in base_path.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    chk = latest_checkpoint(child)
+                    if chk is not None:
+                        run_candidates.append((chk.stat().st_mtime, child))
+                    elif (child / "wandb_id.txt").exists():
+                        run_candidates.append((child.stat().st_mtime, child))
+            if run_candidates:
+                run_candidates.sort(key=lambda x: x[0], reverse=True)
+                latest_run_dir = run_candidates[0][1]
+                chk = latest_checkpoint(latest_run_dir)
+                return latest_run_dir, latest_run_dir.name, str(chk) if chk else None
+
+        auto_name = generate_auto_run_name(config, stage)
+        actual_output = base_path / auto_name
+        return actual_output, auto_name, None
+
+    # Case 3: Explicit name or path passed to --resume
+    candidate_sub = base_path / resume
+    if candidate_sub.exists():
+        if _CHECKPOINT.match(candidate_sub.name):
+            return candidate_sub.parent, candidate_sub.parent.name, str(candidate_sub)
+        chk = latest_checkpoint(candidate_sub)
+        return candidate_sub, candidate_sub.name, str(chk) if chk else None
+
+    candidate_path = Path(resume)
+    if candidate_path.exists():
+        if _CHECKPOINT.match(candidate_path.name):
+            return candidate_path.parent, candidate_path.parent.name, str(candidate_path)
+        chk = latest_checkpoint(candidate_path)
+        return candidate_path, candidate_path.name, str(chk) if chk else None
+
+    raise FileNotFoundError(
+        f"Cannot resume from '{resume}': directory not found in {base_path} or as standalone path"
+    )
 
 
 def build_eval_callback(

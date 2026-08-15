@@ -121,3 +121,50 @@ def test_eval_can_be_switched_off() -> None:
     callback.run_once = lambda model, step: calls.append(step)  # type: ignore[method-assign]
     callback.on_step_end(None, State(), None, model=object())
     assert calls == []
+
+
+def test_resolve_run_and_output_dir(tmp_path) -> None:
+    from lexi_research.cli.config import load_config
+    from lexi_research.train.callbacks import resolve_run_and_output_dir
+
+    p = tmp_path / "params.yaml"
+    p.write_text(
+        """
+train:
+  task: corrector
+  base_model: Qwen/Qwen3.5-0.8B
+  lora_r: 64
+tracking:
+  mode: disabled
+""",
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    base_out = tmp_path / "lexi-runs"
+    base_out.mkdir()
+
+    # 1. Fresh run creates a subfolder with auto name inside base_out
+    actual_dir, run_name, resume_chk = resolve_run_and_output_dir(base_out, "none", cfg, "sft")
+    assert actual_dir.parent == base_out
+    assert run_name.startswith("sft-corrector-qwen3.5-0.8b-r64-")
+    assert resume_chk is None
+
+    # Simulate saving checkpoints in that run directory
+    actual_dir.mkdir(parents=True)
+    (actual_dir / "checkpoint-100").mkdir()
+    (actual_dir / "checkpoint-200").mkdir()
+
+    # 2. Resuming by explicit run name
+    resumed_dir, resumed_name, resumed_chk = resolve_run_and_output_dir(
+        base_out, run_name, cfg, "sft"
+    )
+    assert resumed_dir == actual_dir
+    assert resumed_name == run_name
+    assert resumed_chk.endswith("checkpoint-200")
+
+    # 3. Resuming by 'auto' on base_out finds the latest run folder
+    auto_dir, auto_name, auto_chk = resolve_run_and_output_dir(base_out, "auto", cfg, "sft")
+    assert auto_dir == actual_dir
+    assert auto_name == run_name
+    assert auto_chk.endswith("checkpoint-200")
+

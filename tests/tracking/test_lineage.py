@@ -108,10 +108,11 @@ def test_the_repo_params_declare_tracking() -> None:
 
 
 def test_build_run_name_scenarios(tmp_path) -> None:
-    from lexi_research.tracking.wandb_run import build_run_name
+    from lexi_research.tracking.wandb_run import build_run_name, generate_auto_run_name
 
-    # 1. Explicit name argument takes absolute priority
     cfg = _config(tmp_path, "disabled")
+
+    # 1. Explicit name takes priority if provided
     assert build_run_name(cfg, "sft", explicit_name="my_run") == "my_run"
 
     # 2. Output directory name is used when non-generic
@@ -121,18 +122,20 @@ def test_build_run_name_scenarios(tmp_path) -> None:
     auto = build_run_name(cfg, "sft", output_dir="/tmp/scratch")
     assert auto.startswith("sft-r32-")
 
-    # 4. Config tracking.name override
+    # 4. generate_auto_run_name synthesizes stage, task, model, lora_r, timestamp
     p = tmp_path / "custom.yaml"
     p.write_text(
         """
-tracking:
-  name: my_custom_exp
-  mode: disabled
 train:
+  task: corrector
+  base_model: Qwen/Qwen3.5-0.8B
   lora_r: 16
+tracking:
+  mode: disabled
 """,
         encoding="utf-8",
     )
     custom_cfg = load_config(p)
-    assert build_run_name(custom_cfg, "sft") == "my_custom_exp"
+    auto_custom = generate_auto_run_name(custom_cfg, "sft")
+    assert auto_custom.startswith("sft-corrector-qwen3.5-0.8b-r16-")
 

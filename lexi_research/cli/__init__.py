@@ -247,7 +247,16 @@ def _train_once(
     from lexi_research.eval.harness import iter_rows, load_ceiling
     from lexi_research.format import BandConfig
     from lexi_research.tracking import collect, start
+    from lexi_research.train.callbacks import resolve_run_and_output_dir
     from lexi_research.train.trainer import train_sft
+
+    actual_output_dir, run_name, resume_checkpoint = resolve_run_and_output_dir(
+        base_output_dir=output_dir,
+        resume=args.resume,
+        config=config,
+        stage=stage,
+    )
+    actual_output_dir.mkdir(parents=True, exist_ok=True)
 
     band_config = BandConfig.from_json(args.band_config)
     val_rows = None
@@ -260,13 +269,15 @@ def _train_once(
 
     run_config = config.with_overrides([f"tracking.group={group}"]) if group else config
     lineage = collect(run_config.as_dict(), stage=stage)
-    allow_resume = str(args.resume or "").strip().lower() not in ("none", "false", "off", "no", "0", "null")
+    allow_resume = resume_checkpoint is not None or (
+        str(args.resume or "").strip().lower() not in ("none", "false", "off", "no", "0", "null")
+    )
     run = start(
         run_config,
         stage=stage,
         lineage=lineage,
-        output_dir=output_dir,
-        name=getattr(args, "run_name", None),
+        output_dir=actual_output_dir,
+        name=run_name,
         allow_resume=allow_resume,
     )
 
@@ -274,9 +285,9 @@ def _train_once(
         result = train_sft(
             run_config,
             train_path=args.train,
-            output_dir=output_dir,
+            output_dir=actual_output_dir,
             run=run,
-            resume=args.resume,
+            resume=resume_checkpoint,
             val_rows=val_rows,
             band_config=band_config,
             ceiling=ceiling,
