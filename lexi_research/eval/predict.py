@@ -165,6 +165,22 @@ def _decode_batch(
 
     pad_token_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
     input_ids, attention_mask = _left_pad(prompts, pad_token_id, model.device)
+
+    eos_ids_set: set[int] = set()
+    raw_eos = getattr(tokenizer, "eos_token_id", None)
+    if raw_eos is not None:
+        if isinstance(raw_eos, (list, tuple)):
+            eos_ids_set.update(raw_eos)
+        else:
+            eos_ids_set.add(int(raw_eos))
+    if hasattr(tokenizer, "convert_tokens_to_ids"):
+        for sp in ("<|im_end|>", "<|endoftext|>"):
+            sp_id = tokenizer.convert_tokens_to_ids(sp)
+            if isinstance(sp_id, int) and sp_id != getattr(tokenizer, "unk_token_id", None):
+                eos_ids_set.add(sp_id)
+
+    eos_arg = list(eos_ids_set) if eos_ids_set else None
+
     with torch.no_grad():
         generated = model.generate(
             input_ids=input_ids,
@@ -172,12 +188,30 @@ def _decode_batch(
             max_new_tokens=max_new_tokens,
             do_sample=temperature > 0,
             temperature=temperature if temperature > 0 else None,
+            eos_token_id=eos_arg,
             pad_token_id=pad_token_id,
         )
     # Left padding makes the prompt width identical for every row, so the
     # completion starts at the same offset in all of them.
     width = int(input_ids.shape[-1])
-    return [tokenizer.decode(row[width:], skip_special_tokens=True) for row in generated]
+    results = []
+    for row in generated:
+        gen_tensor = row[width:]
+        if eos_ids_set:
+            gen_list = gen_tensor.tolist()
+            first_eos = None
+            for idx, tok in enumerate(gen_list):
+                if tok in eos_ids_set:
+                    first_eos = idx
+                    break
+            if first_eos is not None:
+                gen_tensor = gen_tensor[:first_eos]
+        decoded = tokenizer.decode(gen_tensor, skip_special_tokens=True).strip()
+        for leak_marker in ("\nuser", "\nassistant", "\nSentence:", "\n<|im_start|>"):
+            if leak_marker in decoded:
+                decoded = decoded.split(leak_marker)[0].strip()
+        results.append(decoded)
+    return results
 
 
 def predict_rows(

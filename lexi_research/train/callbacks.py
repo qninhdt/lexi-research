@@ -414,20 +414,54 @@ def build_correction_eval_callback(
                                 if "max_new_tokens" in config.section("train")
                                 else 256
                             )
+                            # Resolve all valid EOS / end-of-turn token IDs
+                            eos_ids_set: set[int] = set()
+                            raw_eos = getattr(tokenizer, "eos_token_id", None)
+                            if raw_eos is not None:
+                                if isinstance(raw_eos, (list, tuple)):
+                                    eos_ids_set.update(raw_eos)
+                                else:
+                                    eos_ids_set.add(int(raw_eos))
+                            if hasattr(tokenizer, "convert_tokens_to_ids"):
+                                for sp in ("<|im_end|>", "<|endoftext|>"):
+                                    sp_id = tokenizer.convert_tokens_to_ids(sp)
+                                    if isinstance(sp_id, int) and sp_id != getattr(tokenizer, "unk_token_id", None):
+                                        eos_ids_set.add(sp_id)
+
+                            eos_arg = list(eos_ids_set) if eos_ids_set else None
+
                             with torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_cuda_autocast):
                                 batch_outputs = model.generate(
                                     **batch_inputs,
                                     max_new_tokens=gen_max_tokens,
                                     do_sample=False,
                                     use_cache=True,
+                                    eos_token_id=eos_arg,
                                     pad_token_id=tokenizer.pad_token_id,
                                 )
                             prompt_len = batch_inputs["input_ids"].shape[1]
                             for out_seq in batch_outputs:
-                                gen_ids = out_seq[prompt_len:]
+                                gen_ids = out_seq[prompt_len:].tolist()
+                                # Trim at first EOS token if present
+                                first_eos_idx = None
+                                for idx, tok_id in enumerate(gen_ids):
+                                    if tok_id in eos_ids_set:
+                                        first_eos_idx = idx
+                                        break
+                                if first_eos_idx is not None:
+                                    trimmed_ids = gen_ids[:first_eos_idx]
+                                else:
+                                    trimmed_ids = gen_ids
+
                                 pred_text = tokenizer.decode(
-                                    gen_ids, skip_special_tokens=True
+                                    trimmed_ids, skip_special_tokens=True
                                 ).strip()
+
+                                # Strip any accidental multi-turn continuation leaks
+                                for leak_marker in ("\nuser", "\nassistant", "\nSentence:", "\n<|im_start|>"):
+                                    if leak_marker in pred_text:
+                                        pred_text = pred_text.split(leak_marker)[0].strip()
+
                                 predictions.append(pred_text)
                             pbar.update(len(batch_prompts))
 
