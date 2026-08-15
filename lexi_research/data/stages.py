@@ -331,12 +331,16 @@ def run_gec_import(
         min_conversion_rate=float(section["min_conversion_rate"]),
     )
 
+    import random
+
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
     for split in ("train", "val"):
         subset = [row for row in rows if row["split"] == split]
         if not subset:
             raise StageError(f"the {split} split is empty; check gec.val_share")
+        rng = random.Random(int(section["seed"]))
+        rng.shuffle(subset)
         pq.write_table(pa.Table.from_pylist(subset), out_dir / f"{split}.parquet")
 
     report["corpus_sha256"] = _corpus_digest(corpus)
