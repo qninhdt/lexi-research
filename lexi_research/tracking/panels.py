@@ -83,79 +83,57 @@ def qualitative_rows(predictions: Sequence[Mapping[str, Any]]) -> list[list[Any]
 
 
 def compute_html_diff(pred: str | None, gold: str | None) -> str:
-    """Generate a single-line diff: Green (matched / gold target), Red strikethrough (wrong / extra pred)."""
+    """Generate a clean, standard git-style inline diff between model prediction and gold target."""
     if pred is None or gold is None:
         return "<span>N/A</span>"
     p_str = pred.strip()
     g_str = gold.strip()
-    if not p_str and not g_str:
-        return (
-            '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
-            '<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT MATCH</span>'
-            '<span style="color:#6b7280;">(empty)</span></div>'
-        )
     if p_str == g_str:
         import html
 
-        return (
-            f'<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
-            f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:2px 6px;border-radius:4px;margin-right:6px;">✓ EXACT MATCH</span>'
-            f'{html.escape(p_str)}</div>'
-        )
+        return f'<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">{html.escape(p_str)}</div>'
 
     import difflib
     import html
     import re
 
-    # Tokenize preserving spaces, tags [A>B:tag], and words
-    p_tokens = [t for t in re.split(r"(\[[^\]]+\]|\s+)", p_str) if t]
-    g_tokens = [t for t in re.split(r"(\[[^\]]+\]|\s+)", g_str) if t]
+    # Tokenize words, whitespace, and punctuation
+    p_tokens = [t for t in re.split(r"(\s+|[^\w\s])", p_str) if t]
+    g_tokens = [t for t in re.split(r"(\s+|[^\w\s])", g_str) if t]
 
-    matcher = difflib.SequenceMatcher(None, g_tokens, p_tokens)
-
+    matcher = difflib.SequenceMatcher(None, p_tokens, g_tokens)
     parts: list[str] = []
 
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        g_chunk = "".join(g_tokens[i1:i2])
-        p_chunk = "".join(p_tokens[j1:j2])
+        p_chunk = "".join(p_tokens[i1:i2])
+        g_chunk = "".join(g_tokens[j1:j2])
 
         if op == "equal":
-            # Matching tokens: if it is a tag -> GREEN; if regular text -> plain uncolored
-            for tok in p_tokens[j1:j2]:
-                if tok.startswith("[") and tok.endswith("]"):
-                    parts.append(
-                        f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(tok)}</span>'
-                    )
-                else:
-                    parts.append(html.escape(tok))
+            parts.append(html.escape(p_chunk))
         elif op == "replace":
-            # 1. Strike through wrong model prediction (RED strikethrough)
-            # 2. Show expected correct Ground Truth (GREEN box)
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;border:1px solid #86efac;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">-{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">+{html.escape(g_chunk.strip())}</span>'
             )
         elif op == "delete":
-            # Model missed something from Gold -> show expected Ground Truth (GREEN dashed box)
+            # Extra in pred
             parts.append(
-                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:700;border:1px dashed #22c55e;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(g_chunk.strip())}</span>'
+                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 3px;border-radius:2px;">-{html.escape(p_chunk.strip())}</span>'
             )
         elif op == "insert":
-            # Model hallucinated / extra text/tag -> strike through (RED strikethrough)
+            # Missing from pred, in gold
             parts.append(
-                f'<span style="background-color:#fee2e2;color:#b91c1c;text-decoration:line-through;padding:1px 4px;border-radius:3px;margin:0 1px;">{html.escape(p_chunk.strip())}</span>'
+                f'<span style="background-color:#dcfce7;color:#15803d;font-weight:600;padding:1px 3px;border-radius:2px;">+{html.escape(g_chunk.strip())}</span>'
             )
 
     return (
-        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.7;">'
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:1.6;">'
         + "".join(parts)
         + "</div>"
     )
 
 
-CORRECTION_SAMPLE_COLUMNS = (
-    "Visual Diff (Green: Correct / Expected │ Red Strikethrough: Prediction Diff)",
-)
+CORRECTION_SAMPLE_COLUMNS = ("Diff (Git-style: -Prediction / +Gold)",)
 
 
 def log_correction_samples(
