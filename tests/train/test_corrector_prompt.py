@@ -68,13 +68,9 @@ class TestPromptIsolation:
         assert corrector_prompt.corrector_prompt_hash() != before
 
 
-    def test_it_carries_the_full_taxonomy(self) -> None:
-        """Including `coll`, which stage A never emits but stage B must not unlearn."""
-        from lexi_research.format import TAGS
-
-        system = render_corrector_prompt("x")[0]["content"]
-        for tag in sorted(TAGS):
-            assert tag in system, f"tag {tag} missing from the corrector prompt"
+    def test_it_requests_minimal_edits(self) -> None:
+        system = render_corrector_prompt("x")[0]["content"].lower()
+        assert "minimal edits" in system
 
     def test_it_does_not_ask_for_meaning_or_feedback(self) -> None:
         """Stage A has labels for neither; asking would invite invented answers."""
@@ -105,7 +101,7 @@ class TestPromptIsolation:
 
     def test_user_contains_learner_text(self) -> None:
         user = render_corrector_prompt("He speak.")[1]["content"]
-        assert "1 He\n2 speak\n3 ." in user
+        assert "Sentence: He speak." in user
 
     def test_a_missing_variable_raises_rather_than_rendering_empty(self) -> None:
         from jinja2 import UndefinedError
@@ -118,11 +114,11 @@ class TestPromptIsolation:
 
 
 class TestCollator:
-    def test_the_answer_is_the_span_edits(self) -> None:
-        assert corrector_answer(ROW) == "2 3 agr speaks"
+    def test_the_answer_is_the_corrected_sentence(self) -> None:
+        assert corrector_answer(ROW) == "He speaks well."
 
     def test_an_unreadable_sentence_is_spelled_null(self) -> None:
-        assert corrector_answer({"correction": None}) == "NULL"
+        assert corrector_answer({"correction": None}) == "null"
 
     def test_a_non_string_correction_raises(self) -> None:
         from lexi_research.train.collate import CollationError

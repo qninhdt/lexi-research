@@ -265,6 +265,96 @@ def evaluate_span_predictions(
     }
 
 
+def evaluate_rewrite_predictions(
+    raw_inputs: Sequence[str],
+    predictions: Sequence[str | None],
+    references: Sequence[str | None],
+) -> dict[str, float]:
+    """Evaluate Pass 1 rewritten predictions against gold references using the Canonical Aligner.
+
+    Metrics:
+    1. Correction Edit F0.5: Precision, Recall, and F0.5 over (start, end, replacement) edits.
+    2. Clean Exact Accuracy: Accuracy of keeping clean sentences verbatim (prediction == raw).
+    3. Sentence Exact Match: Share of predictions matching gold corrected sentence exactly.
+    4. Null Accuracy: Accuracy of predicting 'null' when gold is 'null'.
+    """
+    from lexi_research.format.aligner import align_words, annotated_to_corrected
+
+    total_samples = len(raw_inputs) or 1
+    clean_total = 0
+    clean_correct = 0
+    null_total = 0
+    null_correct = 0
+    exact_match_count = 0
+
+    total_pred_edits = 0
+    total_gold_edits = 0
+    total_matched_edits = 0
+
+    for raw, pred_str, gold_str in zip(raw_inputs, predictions, references):
+        raw_text = str(raw or "").strip()
+        p_text = str(pred_str or "").strip()
+        g_ref = str(gold_str or "").strip()
+
+        # Derive gold corrected sentence
+        g_corrected = annotated_to_corrected(g_ref) if ("[" in g_ref and "]" in g_ref) else g_ref
+
+        # Check null accuracy
+        is_gold_null = g_corrected.lower() == "null" or g_ref.lower() == "null"
+        is_pred_null = p_text.lower() == "null"
+
+        if is_gold_null:
+            null_total += 1
+            if is_pred_null:
+                null_correct += 1
+            continue
+
+        if is_pred_null:
+            gold_edits = align_words(raw_text, g_corrected)
+            total_gold_edits += len(gold_edits)
+            continue
+
+        # Check sentence exact match
+        if p_text == g_corrected:
+            exact_match_count += 1
+
+        # Check clean sentence accuracy
+        is_clean_gold = g_corrected == raw_text
+        if is_clean_gold:
+            clean_total += 1
+            if p_text == raw_text:
+                clean_correct += 1
+
+        # Extract edits via the EXACT SAME canonical aligner
+        pred_edits = align_words(raw_text, p_text)
+        gold_edits = align_words(raw_text, g_corrected)
+
+        p_set: set[tuple[int, int, str]] = {
+            (e.start, e.end, e.replacement.strip()) for e in pred_edits
+        }
+        g_set: set[tuple[int, int, str]] = {
+            (e.start, e.end, e.replacement.strip()) for e in gold_edits
+        }
+
+        total_pred_edits += len(p_set)
+        total_gold_edits += len(g_set)
+        total_matched_edits += len(p_set & g_set)
+
+    p, r, f05 = compute_f_beta(total_matched_edits, total_pred_edits, total_gold_edits, beta=0.5)
+    clean_acc = (clean_correct / clean_total) if clean_total > 0 else 1.0
+    exact_match_rate = exact_match_count / total_samples
+    null_acc = (null_correct / null_total) if null_total > 0 else 1.0
+
+    return {
+        "correction.edit_f05": f05,
+        "correction.edit_precision": p,
+        "correction.edit_recall": r,
+        "correction.clean_accuracy": clean_acc,
+        "correction.exact_match": exact_match_rate,
+        "correction.null_accuracy": null_acc,
+    }
+
+
 def other_rate(counts: Mapping[str, int]) -> float:
     """Share of edits tagged `other` — how much the taxonomy is failing to cover.
 
@@ -282,6 +372,7 @@ __all__ = [
     "compute_f_beta",
     "correction_scores",
     "edit_triples",
+    "evaluate_rewrite_predictions",
     "evaluate_span_predictions",
     "other_rate",
     "tag_distribution",

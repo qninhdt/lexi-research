@@ -198,3 +198,38 @@ def test_evaluate_span_predictions_core_metrics() -> None:
     # Valid rate: all 3 outputs valid -> 1.0
     assert metrics["correction.valid_output_rate"] == 1.0
 
+
+def test_evaluate_rewrite_predictions_core_metrics() -> None:
+    from lexi_research.eval.correction import evaluate_rewrite_predictions
+
+    raw_inputs = [
+        "He speak English.",
+        "She speak very well.",
+        "This is clean.",
+        "Unreadable text.",
+    ]
+    predictions = [
+        "He speaks English.",  # correct edit speak -> speaks
+        "She speaks very well.",  # predicted speaks, gold spoke -> wrong replacement
+        "This is clean.",  # clean sentence kept clean
+        "null",  # correct null
+    ]
+    references = [
+        "He [speak>speaks:agr] English.",
+        "She [speak>spoke:tense] very well.",
+        "This is clean.",
+        "null",
+    ]
+
+    metrics = evaluate_rewrite_predictions(raw_inputs, predictions, references)
+    # 2 edits in pred: (2, 3, 'speaks') and (2, 3, 'speaks')
+    # 2 edits in gold: (2, 3, 'speaks') and (2, 3, 'spoke')
+    # 1 matched: P = 0.5, R = 0.5 -> F0.5 = 0.5
+    assert metrics["correction.edit_f05"] == pytest.approx(0.5)
+    assert metrics["correction.edit_precision"] == pytest.approx(0.5)
+    assert metrics["correction.edit_recall"] == pytest.approx(0.5)
+    assert metrics["correction.clean_accuracy"] == 1.0
+    # 2 exact matches out of 4 samples (1st sentence and 3rd clean sentence)
+    assert metrics["correction.exact_match"] == 0.5
+    assert metrics["correction.null_accuracy"] == 1.0
+

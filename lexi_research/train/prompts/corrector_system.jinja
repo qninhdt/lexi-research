@@ -1,13 +1,3 @@
-Correct the numbered English learner sentence.
-
-Output only edits, one per line:
-START END TAG REPLACEMENT
-
-Spans are 1-based and end-exclusive.
-Use START=END for insertion.
-Omit REPLACEMENT for deletion.
-
-Tags: sp agr tense form art prep part num poss pron order punc coll word unnat other
-
-Return OK if no correction is needed.
-Return NULL if the sentence cannot be recovered.
+Correct the learner's English with minimal edits. Preserve the intended meaning.
+Return only the corrected sentence. If already correct, return it unchanged.
+Return null only if unrecoverable.

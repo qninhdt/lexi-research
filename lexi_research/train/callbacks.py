@@ -433,29 +433,29 @@ def build_correction_eval_callback(
 
                 tokenizer.padding_side = orig_padding_side
 
-                from lexi_research.eval.correction import evaluate_span_predictions
-                from lexi_research.format.span_converter import render_spans_to_markup
+                from lexi_research.eval.correction import evaluate_rewrite_predictions
+                from lexi_research.format.aligner import annotated_to_corrected
 
                 raw_inputs = [
                     str(row.get("input") or row.get("text") or "").strip()
                     for row in eval_subset
                 ]
-
-                # Render span predictions back to canonical inline markup for visual diffing
-                rendered_predictions = [
-                    render_spans_to_markup(raw, pred)
-                    for raw, pred in zip(raw_inputs, predictions)
+                gold_corrected = [
+                    annotated_to_corrected(ref) if ("[" in ref and "]" in ref) else ref
+                    for ref in references
                 ]
 
-                span_metrics = evaluate_span_predictions(raw_inputs, predictions, references)
+                rewrite_metrics = evaluate_rewrite_predictions(raw_inputs, predictions, references)
 
                 val_metrics: dict[str, float] = {}
                 if val_loss is not None:
                     val_metrics["val/loss"] = val_loss
-                val_metrics["val/full_edit_f05"] = span_metrics["correction.full_edit_f05"]
-                val_metrics["val/span_f05"] = span_metrics["correction.span_f05"]
-                val_metrics["val/clean_accuracy"] = span_metrics["correction.clean_accuracy"]
-                val_metrics["val/valid_output_rate"] = span_metrics["correction.valid_output_rate"]
+                val_metrics["val/correction_edit_f05"] = rewrite_metrics["correction.edit_f05"]
+                val_metrics["val/edit_precision"] = rewrite_metrics["correction.edit_precision"]
+                val_metrics["val/edit_recall"] = rewrite_metrics["correction.edit_recall"]
+                val_metrics["val/clean_accuracy"] = rewrite_metrics["correction.clean_accuracy"]
+                val_metrics["val/sentence_exact_match"] = rewrite_metrics["correction.exact_match"]
+                val_metrics["val/null_accuracy"] = rewrite_metrics["correction.null_accuracy"]
 
                 run.log(val_metrics, step=step)
                 self.history.append({"step": float(step), **val_metrics})
@@ -471,24 +471,22 @@ def build_correction_eval_callback(
                 fixed_hardest_records = [
                     {
                         "input": raw_inputs[idx],
-                        "raw_spans": predictions[idx],
-                        "prediction": rendered_predictions[idx],
-                        "gold": references[idx],
-                        "exact": rendered_predictions[idx] == references[idx],
+                        "prediction": predictions[idx],
+                        "gold": gold_corrected[idx],
+                        "exact": predictions[idx] == gold_corrected[idx],
                     }
                     for idx in target_indices
-                    if idx < len(eval_subset) and idx < len(rendered_predictions)
+                    if idx < len(eval_subset) and idx < len(predictions)
                 ]
                 log_correction_samples(run, fixed_hardest_records, step=step, limit=16)
 
                 loss_header = f"Loss: {val_loss:.4f} │ " if val_loss is not None else ""
                 print(
-                    f"\n[Correction Eval @ Step {step} over {len(eval_subset)} samples] "
+                    f"\n[Pass 1 Eval @ Step {step} over {len(eval_subset)} samples] "
                     f"{loss_header}"
-                    f"Full Edit F0.5: {val_metrics['val/full_edit_f05']:.1%} │ "
-                    f"Span F0.5: {val_metrics['val/span_f05']:.1%} │ "
+                    f"Edit F0.5: {val_metrics['val/correction_edit_f05']:.1%} │ "
                     f"Clean Acc: {val_metrics['val/clean_accuracy']:.1%} │ "
-                    f"Valid Rate: {val_metrics['val/valid_output_rate']:.1%}",
+                    f"Exact Match: {val_metrics['val/sentence_exact_match']:.1%}",
                     flush=True,
                 )
                 for idx in range(min(3, len(fixed_hardest_records))):

@@ -47,16 +47,15 @@ def corrector_messages(row: Mapping[str, Any]) -> list[ChatMsg]:
 
 
 def corrector_answer(row: Mapping[str, Any]) -> str:
-    """The gold answer in span edit format: 'START END TAG REP', 'OK', or 'NULL'."""
-    from lexi_research.format.span_converter import markup_to_spans
+    """The gold answer: the clean minimally corrected sentence, or 'null' for unrecoverable."""
+    from lexi_research.format.aligner import annotated_to_corrected
 
-    raw_text = str(row.get("text") or "")
     correction = row.get("correction")
     if correction is None:
-        return "NULL"
+        return "null"
     if not isinstance(correction, str):
         raise CollationError(f"correction is {type(correction).__name__}, not a string")
-    return markup_to_spans(raw_text, correction)
+    return annotated_to_corrected(correction)
 
 
 def _supervised_text(row: Mapping[str, Any], thinking: str) -> str:

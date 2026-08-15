@@ -6,6 +6,12 @@ and the serving shim — goes through this one module, so the correction format
 has exactly one implementation.
 """
 
+from .aligner import (
+    AlignedEdit,
+    align_words,
+    annotated_to_corrected,
+    reconstruct_source,
+)
 from .bands import (
     MAX_BAND,
     MIN_BAND,
@@ -50,6 +56,7 @@ __all__ = [
     "MIN_BAND",
     "TAGS",
     "UNIT_RE",
+    "AlignedEdit",
     "BandConfig",
     "Bands",
     "Edit",
@@ -63,6 +70,8 @@ __all__ = [
     "ValidationError",
     "ValidationOk",
     "ValidationResult",
+    "align_words",
+    "annotated_to_corrected",
     "count_words",
     "default_config_path",
     "derive_bands",
@@ -73,6 +82,7 @@ __all__ = [
     "parse_correction",
     "parse_span_output",
     "penalty",
+    "reconstruct_source",
     "render",
     "render_spans_to_markup",
     "strip_markup",
