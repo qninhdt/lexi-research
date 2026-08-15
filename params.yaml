@@ -182,10 +182,7 @@ train:
 
   # the switch explicit so a timing ablation can reject it if backward is slower.
   gradient_checkpointing_use_reentrant: false
-  # Group samples of similar length into the same batch to minimize padding overhead.
-  group_by_length: true
   # Stop after this many optimiser steps; 0 runs the full `epochs`. The smoke
-
   # gate sets it to 2.
   max_steps: 0
   load_in_4bit: true

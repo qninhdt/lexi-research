@@ -313,37 +313,6 @@ class _ExampleDataset:
         return iter(self._examples)
 
 
-def _trainer_class(transformers: Any) -> Any:
-    """Build a Trainer that supports length-grouped sampling over Example dataclass."""
-
-    class LexiTrainer(transformers.Trainer):  # type: ignore[misc]
-        def _get_train_sampler(self, train_dataset: Any = None) -> Any:
-            if getattr(self.args, "train_sampling_strategy", None) == "group_by_length":
-                dataset = (
-                    train_dataset
-                    if train_dataset is not None
-                    else self.train_dataset
-                )
-                lengths = [len(e.input_ids) for e in dataset]
-                return transformers.trainer_pt_utils.LengthGroupedSampler(
-                    self.args.train_batch_size
-                    * self.args.gradient_accumulation_steps,
-                    dataset=dataset,
-                    lengths=lengths,
-                )
-            return super()._get_train_sampler(train_dataset)
-
-        def _get_eval_sampler(self, eval_dataset: Any = None) -> Any:
-            from torch.utils.data import SequentialSampler
-
-            dataset = (
-                eval_dataset if eval_dataset is not None else self.eval_dataset
-            )
-            return SequentialSampler(dataset)
-
-    return LexiTrainer
-
-
 def _check_liger_configuration(config: Config) -> None:
     """Verify Liger Kernel is installed when requested."""
     if not config.get_bool("train.use_liger_kernel"):
@@ -548,16 +517,12 @@ def train_sft(
             config.get_bool("train.dataloader_persistent_workers") and dataloader_workers > 0
         ),
         dataloader_prefetch_factor=(dataloader_prefetch if dataloader_workers > 0 else None),
-        train_sampling_strategy=(
-            "group_by_length" if config.get_bool("train.group_by_length") else "random"
-        ),
         seed=config.get_int("train.seed"),
         bf16=bf16,
         report_to=["wandb"] if getattr(run, "active", False) else [],
     )
     pad_token_id = int(getattr(tokenizer, "pad_token_id", 0) or 0)
-    trainer_class = _trainer_class(transformers)
-    trainer = trainer_class(
+    trainer = transformers.Trainer(
         model=model,
         args=arguments,
         train_dataset=_ExampleDataset(examples),
