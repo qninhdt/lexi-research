@@ -2,12 +2,58 @@
 
 from __future__ import annotations
 
+import json
+import re
 from copy import deepcopy
 from typing import Any
 
 from tau_research.data.prepare_sft import sanitize_history_for_turn, strip_thinking_tags
 from tau_research.tau.action_parser import parse_model_output
+from tau_research.tau.env_factory import build_system_prompt
 from tau_research.tau.reward import TauReward, calculate_outcome_reward
+
+_ROLE_PREFIX = re.compile(r"^(?:user|assistant|tool|environment):\s?", re.IGNORECASE)
+
+
+def strip_role_prefix(observation: str) -> str:
+    """Converts a formatted gym observation ('user: ...') into plain message content."""
+    return _ROLE_PREFIX.sub("", observation.strip(), count=1)
+
+
+def parse_reward_info(info: dict[str, Any]) -> TauReward | None:
+    """Parses the official evaluator's reward_info payload from env step info.
+
+    Returns None when the environment did not produce one (e.g. mock envs).
+    """
+    raw = info.get("reward_info")
+    if not raw:
+        return None
+    data = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    reward = float(data.get("reward") or 0.0)
+    breakdown = data.get("reward_breakdown") or {}
+
+    db_val = breakdown.get("DB")
+    comm_val = breakdown.get("COMMUNICATE")
+
+    db_check = data.get("db_check") or {}
+    if db_val is None and db_check:
+        db_val = 1.0 if db_check.get("passed") else 0.0
+
+    comm_checks = data.get("communicate_checks") or []
+    if comm_val is None and comm_checks:
+        passed = [c.get("passed", False) for c in comm_checks]
+        comm_val = 1.0 if passed and all(passed) else 0.0
+
+    partial = float(data.get("partial_action_reward") or 0.0)
+    return TauReward(
+        reward=reward,
+        db_reward=float(db_val) if db_val is not None else (1.0 if reward > 0 else 0.0),
+        communicate_reward=(
+            float(comm_val) if comm_val is not None else (1.0 if reward > 0 else 0.0)
+        ),
+        partial_action_reward=partial,
+        is_success=reward >= 1.0,
+    )
 
 
 class MockTauGymEnv:
@@ -61,13 +107,27 @@ def run_episode_rollout(
     env: Any,
     policy: Any,
     max_turns: int = 8,
-    system_prompt: str = "You are a helpful customer service assistant for Retail operations.",
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    """Executes a full multi-turn rollout until environment termination or truncation."""
+    """Executes a full multi-turn rollout until environment termination or truncation.
+
+    When the environment exposes a domain policy (real AgentGymEnv), the system
+    prompt defaults to the training-format instructions+policy wrapper so
+    inference prompts stay in-distribution with SFT prompts.
+    """
     obs, info = env.reset()
+    resolved_system_prompt = system_prompt
+    if resolved_system_prompt is None:
+        env_policy = info.get("policy") if isinstance(info, dict) else None
+        resolved_system_prompt = (
+            build_system_prompt(str(env_policy))
+            if env_policy
+            else "You are a helpful customer service assistant for Retail operations."
+        )
+
     history: list[dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": obs},
+        {"role": "system", "content": resolved_system_prompt},
+        {"role": "user", "content": strip_role_prefix(str(obs))},
     ]
 
     terminated = False
@@ -77,7 +137,7 @@ def run_episode_rollout(
     step_rewards: list[float] = []
     termination_reason: str | None = None
     last_action = ""
-    final_reward: TauReward = calculate_outcome_reward(False, False)
+    final_reward = calculate_outcome_reward(False, False)
 
     while not (terminated or truncated) and turn_count < max_turns:
         turn_count += 1
@@ -109,16 +169,21 @@ def run_episode_rollout(
         history_assistant = action_payload if parsed.is_tool_call else cleaned_assistant_output
         history.append({"role": "assistant", "content": history_assistant})
         if parsed.is_tool_call:
-            history.append({"role": "tool", "content": obs})
+            history.append({"role": "tool", "content": strip_role_prefix(str(obs))})
         else:
-            history.append({"role": "user", "content": obs})
+            history.append({"role": "user", "content": strip_role_prefix(str(obs))})
 
         hit_max_turns = turn_count >= max_turns and not terminated
         if terminated:
-            final_reward = calculate_outcome_reward(
-                db_success=reward_val == 1.0,
-                communicate_success=True,
-            )
+            # Prefer the official evaluator's breakdown when present.
+            official = parse_reward_info(step_info) if isinstance(step_info, dict) else None
+            if official is not None:
+                final_reward = official
+            else:
+                final_reward = calculate_outcome_reward(
+                    db_success=last_step_reward == 1.0,
+                    communicate_success=True,
+                )
             termination_reason = "agent_stop"
         elif hit_max_turns:
             truncated = True

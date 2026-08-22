@@ -47,7 +47,7 @@ class SFTTrainingConfig:
     merged_dir: str = "artifacts/models/qwen3.5-2b-tau-retail-sft-merged"
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "SFTTrainingConfig":
+    def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 

@@ -83,9 +83,7 @@ def test_prepare_sft_dataset_boundary_split() -> None:
                 {"role": "system", "content": "policy"},
                 {"role": "user", "content": "Cancel my order"},
             ],
-            "completion": [
-                {"role": "assistant", "content": "<think>Ok</think>Done"}
-            ],
+            "completion": [{"role": "assistant", "content": "<think>Ok</think>Done"}],
         }
     ]
     formatted = prepare_sft_dataset_for_trainer(raw, FakeQwenTemplate(), enable_thinking=True)
@@ -102,7 +100,9 @@ def test_prepare_sft_dataset_boundary_split() -> None:
 
 def test_prepare_sft_dataset_skips_unrenderable_prompts() -> None:
     class RaisingTemplate(FakeQwenTemplate):
-        def apply_chat_template(self, messages: list[dict[str, Any]], tokenize: bool = False, **kw: Any) -> str:
+        def apply_chat_template(
+            self, messages: list[dict[str, Any]], tokenize: bool = False, **kw: Any
+        ) -> str:
             if not any(m["role"] == "user" for m in messages):
                 raise ValueError("No user query found in messages.")
             return super().apply_chat_template(messages, tokenize, **kw)

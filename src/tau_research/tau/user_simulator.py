@@ -22,11 +22,13 @@ class UserSimulator:
     def __init__(
         self,
         model_name: str | None = None,
-        temperature: float = 0.0,
+        temperature: float = 0.7,
         api_key: str | None = None,
         api_base: str | None = None,
     ) -> None:
-        self.model_name = model_name or os.environ.get("TAU_USER_MODEL", "openai/grok-4.6")
+        # One frozen external-API simulator across RL rollouts and all evals;
+        # swapping simulators between checkpoints invalidates comparisons.
+        self.model_name = model_name or os.environ.get("TAU_USER_MODEL", "gpt-4.1-mini")
         self.temperature = temperature
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.api_base = api_base or os.environ.get("OPENAI_API_BASE", "")

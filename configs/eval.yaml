@@ -14,7 +14,7 @@ decoding:
   max_generated_tokens_per_turn: 1024
 
 user_simulator:
-  model: "gpt-4o-mini"
+  model: "gpt-4.1-mini"
   temperature: 0.7
 
 output:

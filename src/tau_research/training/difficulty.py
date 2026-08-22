@@ -76,3 +76,48 @@ def sample_tasks_by_difficulty(
 
     rng.shuffle(sampled)
     return sampled
+
+
+def profile_task_difficulty(
+    policy: Any,
+    task_ids: list[str],
+    env_factory: Any,
+    trials_per_task: int = 4,
+    max_turns: int = 8,
+) -> "DifficultyProfile":
+    """Profiles empirical success per task by rolling out the current policy.
+
+    Runs ``trials_per_task`` episodes against a fresh env per trial and buckets
+    tasks into easy (all success), learnable (mixed), and hard (no success).
+    """
+    from collections import defaultdict
+
+    from tau_research.tau.rollout import run_episode_rollout
+
+    successes: dict[str, int] = defaultdict(int)
+    for task_id in task_ids:
+        for _trial in range(trials_per_task):
+            env = env_factory.create(task_id)
+            trajectory = run_episode_rollout(env, policy, max_turns=max_turns)
+            if trajectory["reward"].is_success:
+                successes[task_id] += 1
+
+    profile = DifficultyProfile()
+    for task_id in task_ids:
+        bucket = classify_task_difficulty(successes[task_id], trials_per_task)
+        if bucket == "easy":
+            profile.easy_tasks.append(task_id)
+        elif bucket == "learnable":
+            profile.learnable_tasks.append(task_id)
+        else:
+            profile.hard_tasks.append(task_id)
+    return profile
+
+
+def summarize_profile(profile: "DifficultyProfile") -> dict[str, int]:
+    """Returns bucket sizes for logging."""
+    return {
+        "easy": len(profile.easy_tasks),
+        "learnable": len(profile.learnable_tasks),
+        "hard": len(profile.hard_tasks),
+    }

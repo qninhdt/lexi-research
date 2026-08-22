@@ -63,8 +63,10 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         flagged = len(report["flagged_pairs"])
-        print(f"Audited {report['areal_dialogs_audited']} dialogs vs "
-              f"{report['official_test_tasks']} test tasks: {flagged} flagged pairs -> {out_path}")
+        print(
+            f"Audited {report['areal_dialogs_audited']} dialogs vs "
+            f"{report['official_test_tasks']} test tasks: {flagged} flagged pairs -> {out_path}"
+        )
     elif args.command == "train-sft":
         from tau_research.training.train_sft import SFTTrainingConfig, run_sft_training
 
