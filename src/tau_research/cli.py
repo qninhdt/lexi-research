@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def main() -> None:
@@ -44,6 +45,21 @@ def main() -> None:
         "--dry-run", action="store_true", help="Load and render data only, no model load"
     )
 
+    # Evaluation
+    eval_parser = subparsers.add_parser(
+        "evaluate", help="Run multi-trial tau2 evaluation for a checkpoint"
+    )
+    eval_parser.add_argument("--config", default="configs/eval.yaml")
+    eval_parser.add_argument(
+        "--model-path", required=True, help="Base/SFT-merged/RL-merged model path"
+    )
+    eval_parser.add_argument("--tag", default="dev", help="Checkpoint tag for results dir")
+    eval_parser.add_argument(
+        "--policy", choices=["hf", "vllm"], default="hf", help="Policy backend"
+    )
+    eval_parser.add_argument("--split", default=None, help="Override split (train/test)")
+    eval_parser.add_argument("--limit", type=int, default=None, help="Only first N tasks")
+
     args = parser.parse_args()
 
     if args.command == "smoke":
@@ -73,6 +89,51 @@ def main() -> None:
         cfg = SFTTrainingConfig.from_yaml(args.config)
         summary = run_sft_training(cfg, max_steps=args.max_steps, dry_run=args.dry_run)
         print(json.dumps(summary, indent=2))
+    elif args.command == "evaluate":
+        from tau_research.evaluation.evaluate_tau import EvalRunConfig, evaluate_from_config
+        from tau_research.tau.env_factory import TauEnvFactory
+
+        eval_cfg = EvalRunConfig.from_yaml(args.config)
+        if args.tag:
+            eval_cfg.checkpoint_tag = args.tag
+        if args.split:
+            eval_cfg.split = args.split
+
+        common: dict[str, Any] = dict(
+            temperature=eval_cfg.temperature,
+            top_p=eval_cfg.top_p,
+            top_k=eval_cfg.top_k,
+            max_new_tokens=eval_cfg.max_generated_tokens_per_turn,
+            enable_thinking=eval_cfg.enable_thinking,
+        )
+        policy: Any
+        if args.policy == "vllm":
+            from tau_research.evaluation.policies import VLLMChatPolicy
+
+            policy = VLLMChatPolicy(args.model_path, **common)
+        else:
+            from tau_research.evaluation.policies import HFChatPolicy
+
+            policy = HFChatPolicy(args.model_path, **common)
+
+        factory = TauEnvFactory(
+            domain=eval_cfg.domain,
+            split=eval_cfg.split,
+            user_model=eval_cfg.user_model,
+            user_temperature=eval_cfg.user_temperature,
+        )
+        task_ids = factory.iter_task_ids()
+        if args.limit:
+            task_ids = task_ids[: args.limit]
+
+        results = evaluate_from_config(eval_cfg, task_ids, policy, factory)
+        ci_low, ci_high = results["ci_95"]
+        print(
+            f"[evaluate:{args.tag}] Pass^1={results['pass_rate']:.2%} "
+            f"95% CI=[{ci_low:.2%}, {ci_high:.2%}] over {len(task_ids)} tasks"
+        )
+        print(f"Pass^k: {results['pass_k']}")
+        print(f"Results: {eval_cfg.resolve_results_file()}")
     else:
         parser.print_help()
 

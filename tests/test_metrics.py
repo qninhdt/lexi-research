@@ -40,3 +40,28 @@ def test_compute_paired_deltas() -> None:
     delta_sft, delta_rl = compute_paired_deltas(base_scores, sft_scores, rl_scores)
     assert np.isclose(delta_sft, 0.2)
     assert np.isclose(delta_rl, 0.15)
+
+
+def test_compute_pass_k_all_or_nothing() -> None:
+    from tau_research.evaluation.metrics import compute_pass_k
+
+    results = {
+        "t1": [1.0, 1.0, 1.0, 1.0],  # pass^k = 1 for all k
+        "t2": [0.0, 0.0, 0.0, 0.0],  # 0 for all k
+        "t3": [1.0, 0.0, 0.0, 0.0],  # C(1,k)/C(4,k)
+    }
+    assert compute_pass_k(results, 1) == (4 + 0 + 1) / 12
+    # k=2: t3 contributes C(1,2)/C(4,2)=0; only t1 survives.
+    assert compute_pass_k(results, 2) == 1 / 3
+    assert compute_pass_k(results, 4) == 1 / 3
+
+
+def test_paired_bootstrap_delta_recovers_shift() -> None:
+    from tau_research.evaluation.metrics import paired_bootstrap_delta
+
+    a = {f"t{i}": 0.0 if i % 2 else 1.0 for i in range(40)}
+    b = {t: min(1.0, v + 0.25) for t, v in a.items()}
+    stats = paired_bootstrap_delta(a, b, n_bootstraps=500, seed=42)
+    # Half the tasks shift by +0.25, half are capped at 1.0 (delta 0).
+    assert abs(stats["delta"] - 0.125) < 1e-9
+    assert stats["ci_low"] > 0.0  # consistent positive shift => CI excludes zero

@@ -79,3 +79,69 @@ def compute_paired_deltas(
     delta_rl = float(rl_avg - sft_avg)
 
     return delta_sft, delta_rl
+
+
+def compute_pass_k(task_results: dict[str, list[float]], k: int) -> float:
+    """Computes Pass^k: a task counts only if ALL k attempts succeed.
+
+    With n trials and s successes per task the unbiased estimate is
+    C(s, k) / C(n, k), averaged over tasks (leaderboard convention).
+    """
+    if k <= 0:
+        raise ValueError("k must be >= 1")
+    total = 0.0
+    counted = 0
+    for trials in task_results.values():
+        n = len(trials)
+        if n < k:
+            continue
+        s = int(sum(1 for t in trials if t >= 1.0))
+        total += _binomial(s, k) / _binomial(n, k)
+        counted += 1
+    if counted == 0:
+        return 0.0
+    return total / counted
+
+
+def _binomial(n: int, k: int) -> float:
+    if k < 0 or k > n:
+        return 0.0
+    result = 1.0
+    for i in range(min(k, n - k)):
+        result = result * (n - i) / (i + 1)
+    return result
+
+
+def paired_bootstrap_delta(
+    scores_a: dict[str, float],
+    scores_b: dict[str, float],
+    n_bootstraps: int = 1000,
+    confidence_level: float = 0.95,
+    seed: int = 42,
+) -> dict[str, float]:
+    """Bootstrap CI for the paired mean delta (B - A) over shared tasks.
+
+    Resampling shared task IDs removes between-task variance, which is the
+    dominant noise source when the test split has only ~40 tasks.
+    """
+    shared = sorted(set(scores_a) & set(scores_b))
+    if not shared:
+        return {"delta": 0.0, "ci_low": 0.0, "ci_high": 0.0}
+
+    a = np.array([scores_a[t] for t in shared], dtype=np.float64)
+    b = np.array([scores_b[t] for t in shared], dtype=np.float64)
+    deltas = b - a
+
+    rng = np.random.default_rng(seed)
+    n = len(shared)
+    boot = np.empty(n_bootstraps, dtype=np.float64)
+    for i in range(n_bootstraps):
+        idx = rng.integers(0, n, size=n)
+        boot[i] = float(np.mean(deltas[idx]))
+
+    alpha = (1.0 - confidence_level) / 2.0
+    return {
+        "delta": float(np.mean(deltas)),
+        "ci_low": float(np.percentile(boot, alpha * 100)),
+        "ci_high": float(np.percentile(boot, (1.0 - alpha) * 100)),
+    }

@@ -1,4 +1,4 @@
-"""Evaluation harness running 4-trial benchmark on held-out tau3-bench Retail test split."""
+"""Evaluation harness running multi-trial benchmarks on held-out tau2 splits."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from tau_research.evaluation.error_analysis import (
 from tau_research.evaluation.metrics import (
     bootstrap_confidence_interval,
     calculate_pass_rate,
+    compute_pass_k,
     task_level_scores,
 )
 
@@ -28,7 +29,14 @@ class EvalRunConfig:
     max_agent_turns: int
     temperature: float
     results_file: str
-    system_prompt: str = "You are a helpful customer service assistant for Retail operations."
+    system_prompt: str | None = None
+    checkpoint_tag: str = "dev"
+    enable_thinking: bool = True
+    top_p: float = 0.95
+    top_k: int = 20
+    max_generated_tokens_per_turn: int = 1024
+    user_model: str = "gpt-4.1-mini"
+    user_temperature: float = 0.7
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> EvalRunConfig:
@@ -38,6 +46,8 @@ class EvalRunConfig:
         ev = data.get("evaluation", {})
         dec = data.get("decoding", {})
         out = data.get("output", {})
+        sim = data.get("user_simulator", {})
+        tag = str(ev.get("checkpoint_tag") or out.get("checkpoint_tag") or "dev")
 
         return cls(
             domain=ev.get("domain", "retail"),
@@ -47,13 +57,23 @@ class EvalRunConfig:
             temperature=float(dec.get("temperature", 0.6)),
             results_file=out.get(
                 "results_file",
-                "artifacts/evaluation/eval_results.jsonl",
+                "artifacts/evaluation/{tag}/eval_results.jsonl",
             ),
-            system_prompt=ev.get(
-                "system_prompt",
-                "You are a helpful customer service assistant for Retail operations.",
-            ),
+            system_prompt=ev.get("system_prompt"),
+            checkpoint_tag=tag,
+            enable_thinking=bool(dec.get("enable_thinking", True)),
+            top_p=float(dec.get("top_p", 0.95)),
+            top_k=int(dec.get("top_k", 20)),
+            max_generated_tokens_per_turn=int(dec.get("max_generated_tokens_per_turn", 1024)),
+            user_model=str(sim.get("model", "gpt-4.1-mini")),
+            user_temperature=float(sim.get("temperature", 0.7)),
         )
+
+    def resolve_results_file(self) -> Path:
+        """Substitutes the {tag} placeholder so checkpoints never overwrite each other."""
+        path = Path(self.results_file.format(tag=self.checkpoint_tag))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
 
 def evaluate_task_batch(
@@ -61,9 +81,9 @@ def evaluate_task_batch(
     policy: Any,
     env_factory: Any,
     num_trials: int = 4,
-    results_path: str | Path = "artifacts/evaluation/eval_results.jsonl",
+    results_path: str | Path = "artifacts/evaluation/dev/eval_results.jsonl",
     max_agent_turns: int = 8,
-    system_prompt: str = ("You are a helpful customer service assistant for Retail operations."),
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Runs N trials across all task IDs and outputs structured summary stats."""
     from tau_research.tau.rollout import run_episode_rollout
@@ -81,7 +101,11 @@ def evaluate_task_batch(
         for tid in task_ids:
             scores: list[float] = []
             for trial_idx in range(num_trials):
-                env = env_factory(task_id=tid)
+                env = (
+                    env_factory.create(tid)
+                    if hasattr(env_factory, "create")
+                    else env_factory(task_id=tid)
+                )
                 traj = run_episode_rollout(
                     env,
                     policy,
@@ -120,6 +144,7 @@ def evaluate_task_batch(
         "pass_rate": pass_rate,
         "mean": mean_val,
         "ci_95": (low_ci, high_ci),
+        "pass_k": {f"pass^{k}": compute_pass_k(task_results, k) for k in (1, 2, 4)},
         "total_trials": len(all_trajectories),
         "task_results": task_results,
         "error_distribution": summarize_error_distribution(error_list),
@@ -132,13 +157,13 @@ def evaluate_from_config(
     policy: Any,
     env_factory: Any,
 ) -> dict[str, Any]:
-    """Convenience wrapper that forwards EvalRunConfig fields into the batch runner."""
+    """Convenience wrapper forwarding EvalRunConfig fields into the batch runner."""
     return evaluate_task_batch(
         task_ids=task_ids,
         policy=policy,
         env_factory=env_factory,
         num_trials=cfg.num_trials,
-        results_path=cfg.results_file,
+        results_path=str(cfg.resolve_results_file()),
         max_agent_turns=cfg.max_agent_turns,
         system_prompt=cfg.system_prompt,
     )

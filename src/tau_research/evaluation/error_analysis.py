@@ -1,4 +1,11 @@
-"""Automated 11-category error taxonomy classification."""
+"""Automated 11-category error taxonomy classification.
+
+Mapping uses the termination reasons actually emitted by the rollout loop
+(agent_stop, max_turns, truncation, empty_output, empty_action, env_truncated)
+plus the official reward breakdown; categories that need information the
+harness does not capture (policy violations, wrong arguments) stay reachable
+via manual review of eval_results.jsonl rather than fabricated signals.
+"""
 
 from collections import Counter
 from enum import StrEnum
@@ -21,13 +28,24 @@ class ErrorCategory(StrEnum):
 
 def classify_episode_error(trajectory: dict[str, Any]) -> ErrorCategory:
     """Classifies a failed episode into one of the 11 error taxonomy categories."""
-    term_reason = trajectory.get("termination_reason", "")
-    last_action = str(trajectory.get("last_action", ""))
+    term_reason = str(trajectory.get("termination_reason") or "")
+    db_reward = float(trajectory.get("db_reward", 0.0))
+    comm_reward = float(trajectory.get("communicate_reward", 0.0))
+    num_turns = int(trajectory.get("num_turns", 0))
 
-    if term_reason == "truncation" or "<think>" in last_action:
+    # Truncation family: generation cut off mid-thought or empty action.
+    if term_reason in {"truncation", "empty_output", "empty_action"}:
         return ErrorCategory.THINKING_LOOP_TRUNCATION
 
-    if term_reason == "invalid_syntax" or "bad json" in last_action:
+    # Environment-side truncation (e.g. user simulator stopped unexpectedly).
+    if term_reason == "env_truncated":
+        return ErrorCategory.USER_MISUNDERSTANDING
+
+    # Ran out of turns: usually looping on reads without converging.
+    if term_reason == "max_turns":
+        return ErrorCategory.UNNECESSARY_REPEATED_READ
+
+    if term_reason in {"invalid_syntax", "bad_json"}:
         return ErrorCategory.INVALID_TOOL_SYNTAX
 
     if term_reason == "nonexistent_tool":
@@ -36,16 +54,12 @@ def classify_episode_error(trajectory: dict[str, Any]) -> ErrorCategory:
     if term_reason == "policy_violation":
         return ErrorCategory.POLICY_VIOLATION
 
-    db_reward = trajectory.get("db_reward", 1.0)
-    comm_reward = trajectory.get("communicate_reward", 1.0)
-
-    if db_reward == 0.0 and comm_reward == 1.0:
+    # agent_stop failures: split by which reward component was lost.
+    if db_reward < 1.0 and comm_reward >= 1.0:
         return ErrorCategory.INCORRECT_DB_MUTATION
-
-    if db_reward == 1.0 and comm_reward == 0.0:
+    if db_reward >= 1.0 and comm_reward < 1.0:
         return ErrorCategory.MISSING_REQUIRED_COMMUNICATION
-
-    if trajectory.get("num_turns", 0) <= 1:
+    if num_turns <= 1:
         return ErrorCategory.PREMATURE_FINAL_ANSWER
 
     return ErrorCategory.WRONG_TOOL
