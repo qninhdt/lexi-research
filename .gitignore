@@ -42,3 +42,7 @@ scratch/
 .agents/
 .agent/
 .repomixignore
+
+# Split/profile artifacts are regenerable (converter manifest + profile-difficulty
+# document their protocol); committing them risks shipping stale mock data.
+artifacts/splits/

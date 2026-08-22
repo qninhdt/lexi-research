@@ -231,11 +231,28 @@ def weight_tasks_by_difficulty(
     profile = load_difficulty_profile(profile_path)
     if profile is None:
         return list(task_ids)
+
     buckets = {
         "learnable": set(profile.learnable_tasks),
         "easy": set(profile.easy_tasks),
         "hard": set(profile.hard_tasks),
     }
+    # A stale or foreign profile (e.g. mock-named tasks) must never silently
+    # distort sampling weights: require real overlap with the actual pool.
+    known = buckets["learnable"] | buckets["easy"] | buckets["hard"]
+    overlap = len(known & set(task_ids))
+    if overlap == 0:
+        print(
+            f"[train-grpo] warning: difficulty profile has 0/{len(known)} IDs matching "
+            f"the {len(task_ids)} official train tasks; ignoring it. Regenerate via "
+            "'tau-research profile-difficulty'."
+        )
+        return list(task_ids)
+    if overlap < len(set(task_ids)) // 2:
+        print(
+            f"[train-grpo] warning: difficulty profile covers only {overlap}/"
+            f"{len(set(task_ids))} train tasks; uncovered tasks fall into the easy bucket."
+        )
     other_weight = (1.0 - learnable_weight) / 2.0
     repeats = {
         "learnable": max(1, round(learnable_weight * 10)),
