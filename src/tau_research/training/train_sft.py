@@ -47,6 +47,7 @@ class SFTTrainingConfig:
     merged_dir: str = "artifacts/models/qwen3.5-2b-tau-retail-sft-merged"
     report_to: str = "none"
     max_steps: int | None = None
+    eval_strategy: str = "no"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
@@ -86,6 +87,7 @@ class SFTTrainingConfig:
             run_name=str(w.get("run_name", "qwen35-2b-sft-retail")),
             report_to=str(t.get("report_to", "none")),
             max_steps=(int(t["max_steps"]) if t.get("max_steps") is not None else None),
+            eval_strategy=str(t.get("eval_strategy", "no")),
         )
 
 
@@ -234,7 +236,7 @@ def run_sft_training(
         warmup_ratio=config.warmup_ratio,
         num_train_epochs=effective_max_steps or config.num_train_epochs,
         logging_steps=config.logging_steps,
-        eval_strategy="steps",
+        eval_strategy=config.eval_strategy,
         eval_steps=config.eval_steps,
         save_strategy="steps",
         save_steps=config.save_steps,
