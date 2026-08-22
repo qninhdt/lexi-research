@@ -1,6 +1,6 @@
 ---
 title: "Migrate SFT to AReaL-tau2-data, Fix Blocking Bugs, Harden Pipeline for Training"
-status: planning
+status: implemented
 created: 2026-08-22
 mode: tdd
 blockedBy: []
@@ -28,12 +28,12 @@ Scout toàn repo phát hiện pipeline hiện tại là bộ khung TDD thuần t
 
 | Phase | Title | Status | Dependencies |
 |---|---|---|---|
-| [Phase 01](phase-01-data-pipeline-and-tokenizer-fixes.md) | Data pipeline rebuild (AReaL converter) + Bug B fix + length profile | pending | [] |
-| [Phase 02](phase-02-sft-trainer-entrypoint.md) | Real SFT training entrypoint (Bug A fix ở đây) | pending | [01] |
-| [Phase 03](phase-03-real-env-integration.md) | AgentGymEnv thật: env factory, reward extraction, difficulty profiler | pending | [01] |
-| [Phase 04](phase-04-eval-harness-hardening.md) | Eval harness: policy loaders, decoding plumbing, pass^k, per-checkpoint results | pending | [02, 03] |
-| [Phase 05](phase-05-grpo-pipeline.md) | Real TRL rollout_func + memory plan + zero-variance wiring | pending | [03, 04] |
-| [Phase 06](phase-06-scripts-cli-docs-polish.md) | Scripts/CLI/docs polish + commit baseline | pending | [01..05] |
+| [Phase 01](phase-01-data-pipeline-and-tokenizer-fixes.md) | Data pipeline rebuild (AReaL converter) + Bug B fix + length profile | completed | [] |
+| [Phase 02](phase-02-sft-trainer-entrypoint.md) | Real SFT training entrypoint (Bug A fix ở đây) | completed | [01] |
+| [Phase 03](phase-03-real-env-integration.md) | AgentGymEnv thật: env factory, reward extraction, difficulty profiler | completed | [01] |
+| [Phase 04](phase-04-eval-harness-hardening.md) | Eval harness: policy loaders, decoding plumbing, pass^k, per-checkpoint results | completed | [02, 03] |
+| [Phase 05](phase-05-grpo-pipeline.md) | Real TRL rollout_func + memory plan + zero-variance wiring | completed | [03, 04] |
+| [Phase 06](phase-06-scripts-cli-docs-polish.md) | Scripts/CLI/docs polish + commit baseline | completed | [01..05] |
 
 ## Global Acceptance Criteria
 

@@ -254,6 +254,19 @@ def run_sft_training(
         processing_class=tokenizer,
     )
 
+    kept = len(trainer.train_dataset)
+    if kept == 0:
+        raise ValueError(
+            "TRL dropped every training example (usually max_seq_length smaller "
+            "than the rendered sequences). Raise max_seq_length or shorten data."
+        )
+    if kept < len(train_formatted):
+        print(
+            f"[train-sft] warning: TRL kept {kept}/{len(train_formatted)} examples "
+            f"after length filtering (max_seq_length={config.max_seq_length})"
+        )
+    summary["train_after_length_filter"] = kept
+
     trainer.train()
     adapter_dir = Path(config.output_dir) / "final-adapter"
     trainer.save_model(str(adapter_dir))

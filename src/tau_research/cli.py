@@ -112,12 +112,12 @@ def main() -> None:
         print(json.dumps(summary, indent=2))
     elif args.command == "profile-difficulty":
         from tau_research.evaluation.policies import HFChatPolicy
+        from tau_research.tau.env_factory import TauEnvFactory
         from tau_research.training.difficulty import profile_task_difficulty, summarize_profile
         from tau_research.training.train_grpo import GRPOTrainingConfig
-        from tau_research.tau.env_factory import TauEnvFactory
 
         grpo_cfg = GRPOTrainingConfig.from_yaml(args.config)
-        policy = HFChatPolicy(args.model_path)
+        prof_policy = HFChatPolicy(args.model_path)
         factory = TauEnvFactory(
             domain=grpo_cfg.domain,
             split=grpo_cfg.rl_split,
@@ -128,7 +128,9 @@ def main() -> None:
         if args.max_tasks:
             task_ids = task_ids[: args.max_tasks]
 
-        profile = profile_task_difficulty(policy, task_ids, factory, trials_per_task=args.trials)
+        profile = profile_task_difficulty(
+            prof_policy, task_ids, factory, trials_per_task=args.trials
+        )
         profile.save(args.output)
         print(f"Profile saved to {args.output}: {summarize_profile(profile)}")
     elif args.command == "train-grpo":
