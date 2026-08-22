@@ -28,7 +28,11 @@ def parse_reward_info(info: dict[str, Any]) -> TauReward | None:
     raw = info.get("reward_info")
     if not raw:
         return None
-    data = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except (json.JSONDecodeError, TypeError):
+        # Malformed evaluator payload must not kill a long episode.
+        return None
     reward = float(data.get("reward") or 0.0)
     breakdown = data.get("reward_breakdown") or {}
 

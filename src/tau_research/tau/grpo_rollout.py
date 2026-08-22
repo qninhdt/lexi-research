@@ -38,7 +38,14 @@ class GenerationBackend:
                 images=None,
                 num_generations=1,
             )
-            return list(completion_ids[0]), [float(x) for x in logprobs[0]]
+            # TRL's VLLMGeneration returns per-token top-k logprobs shaped
+            # (batch, seq_len, num_logprobs); policy loss wants the sampled
+            # token's logprob, i.e. index 0 of the last axis.
+            seq_logprobs = logprobs[0]
+            flat: list[float] = []
+            for entry in seq_logprobs:
+                flat.append(float(entry[0]) if isinstance(entry, (list, tuple)) else float(entry))
+            return list(completion_ids[0]), flat
 
         # CPU / non-vLLM fallback: greedy-free sampling straight off the policy.
         import torch
@@ -114,6 +121,19 @@ def run_grpo_episode(
         raw_output = tokenizer.decode(gen_ids, skip_special_tokens=False)
         raw_output = raw_output.split("<|im_end|>")[0]
 
+        # Sampling backends include the terminating <|im_end|>/EOS token in
+        # output ids; drop it so the manual turn-end below is the ONLY one.
+        eos_like = {
+            getattr(tokenizer, "eos_token_id", None),
+            tokenizer.convert_tokens_to_ids("<|im_end|>")
+            if hasattr(tokenizer, "convert_tokens_to_ids")
+            else None,
+        }
+        while gen_ids and gen_ids[-1] in eos_like:
+            gen_ids.pop()
+            if len(gen_logprobs) == len(gen_ids) + 1:
+                gen_logprobs.pop()
+
         sequence_ids.extend(gen_ids)
         completion_ids.extend(gen_ids)
         logprobs.extend(gen_logprobs)
@@ -121,7 +141,7 @@ def run_grpo_episode(
         completion_budget -= len(gen_ids)
 
         # Close the assistant turn exactly like the template does.
-        append_env_text(ASSISTANT_TURN_END if not raw_output.endswith("\n") else "")
+        append_env_text(ASSISTANT_TURN_END)
 
         parsed = parse_model_output(raw_output)
         if parsed.is_truncated:
@@ -193,18 +213,22 @@ def make_tau_rollout_func(
         tau_db: list[float] = []
         tau_comm: list[float] = []
 
+        policy_cache: dict[str, str] = {}
         for row in prompts:
             task_id = row["prompt"] if isinstance(row, dict) else str(row)
-            # One reset per episode only to read the policy; episodes themselves
-            # get a fresh env so DB state starts clean every generation.
-            probe_env = env_factory.create(str(task_id))
-            _obs, info = probe_env.reset()
-            policy_text = str(info.get("policy") or "")
-            system_prompt = (
-                build_system_prompt(policy_text)
-                if policy_text
-                else "You are a helpful customer service assistant for Retail operations."
-            )
+            # Policy text is static per task: read it once per prompt via one
+            # reset (each reset spawns an orchestrator thread + a user-sim API
+            # call), then reuse for every generation episode.
+            if task_id not in policy_cache:
+                probe_env = env_factory.create(str(task_id))
+                _obs, info = probe_env.reset()
+                policy_text = str(info.get("policy") or "")
+                policy_cache[str(task_id)] = (
+                    build_system_prompt(policy_text)
+                    if policy_text
+                    else "You are a helpful customer service assistant for Retail operations."
+                )
+            system_prompt = policy_cache[str(task_id)]
 
             for _gen in range(num_generations):
                 episode_env = env_factory.create(str(task_id))

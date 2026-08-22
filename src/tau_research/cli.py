@@ -84,7 +84,20 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "smoke":
-        print(f"[tau-research] Running smoke verification with {args.config}...")
+        # Real CPU gate: converter on fixture data, then render dry-run.
+        from tau_research.data.load_areal_sft import convert_file
+        from tau_research.training.train_sft import SFTTrainingConfig, run_sft_training
+
+        manifest = convert_file("tests/fixtures/areal_sample.jsonl", "/tmp/tau_smoke_data")
+        assert manifest["train_examples"] > 0, "converter produced no examples"
+        cfg = SFTTrainingConfig.from_yaml(args.config)
+        cfg.train_path = "/tmp/tau_smoke_data/areal_sft_train.json"
+        cfg.val_path = "/tmp/tau_smoke_data/areal_sft_val.json"
+        summary = run_sft_training(cfg, dry_run=True)
+        assert summary["train_formatted"] > 0, "no training example rendered"
+        assert summary["train_skipped_render"] == 0, (
+            f"{summary['train_skipped_render']} examples failed chat-template rendering"
+        )
         print("[tau-research] Smoke verification passed.")
         sys.exit(0)
     elif args.command == "convert-areal":

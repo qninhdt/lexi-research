@@ -330,6 +330,9 @@ def run_grpo_training(
     )
     if max_steps:
         grpo_kwargs["max_steps"] = max_steps
+    # NOTE: TrainingArguments.resume_from_checkpoint is NOT consumed by
+    # Trainer.train() automatically; it must be passed explicitly below.
+    resume_path = resolve_resume_checkpoint(config)
 
     trainer = GRPOTrainer(
         model=config.model_name,
@@ -346,7 +349,7 @@ def run_grpo_training(
             task_type="CAUSAL_LM",
         ),
     )
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_path)
     trainer.save_model(config.merged_dir)
     summary["merged_dir"] = config.merged_dir
     return summary

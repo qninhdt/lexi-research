@@ -105,7 +105,9 @@ def _parse_scalar(raw: str) -> Any:
     if (text.startswith("'") and text.endswith("'")) or (
         text.startswith('"') and text.endswith('"')
     ):
-        return text[1:-1]
+        # Undo the escaping applied by format_functional_tool_call so a parsed
+        # call re-serializes byte-identically.
+        return text[1:-1].replace("\\'", "'").replace("\\\\", "\\")
     lowered = text.lower()
     if lowered == "true":
         return True
