@@ -15,6 +15,7 @@ environment:
   benchmark: "sierra-research/tau2-bench"
   version: "1.0.1"
   domain: "retail"
+  rl_split: "train"
   solo_mode: false
   user_simulator:
     model: "gpt-4.1-mini"
@@ -37,12 +38,16 @@ training:
   gradient_accumulation_steps: 16
   learning_rate: 1.0e-5
   num_generations: 4
-  max_completion_length: 1536
+  # Episode-level budget: completion spans ALL agent turns of a rollout,
+  # not a single generation (measured episodes are ~2-4k agent tokens).
+  max_completion_length: 4096
   gradient_checkpointing: true
   loss_type: "dapo"
   beta: 0.0
   use_vllm: true
   vllm_mode: "colocate"
+  temperature: 1.0
+  top_p: 0.95
   vllm_gpu_memory_utilization: 0.20
   vllm_enable_sleep_mode: true
   logging_steps: 5

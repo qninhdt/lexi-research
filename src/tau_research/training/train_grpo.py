@@ -36,6 +36,15 @@ class GRPOTrainingConfig:
     hard_weight: float = 0.15
     resample_on_zero_variance: bool = True
     max_consecutive_zero_variance_batches: int = 3
+    domain: str = "retail"
+    rl_split: str = "train"
+    user_model: str = "gpt-4.1-mini"
+    user_temperature: float = 0.7
+    temperature: float = 1.0
+    top_p: float = 0.95
+    use_vllm: bool = True
+    vllm_mode: str = "colocate"
+    merged_dir: str = "artifacts/models/qwen3.5-2b-tau-retail-grpo-merged"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> GRPOTrainingConfig:
@@ -65,7 +74,7 @@ class GRPOTrainingConfig:
             seed=int(t.get("seed", 42)),
             resume_from_checkpoint=t.get("resume_from_checkpoint"),
             save_steps=int(t.get("save_steps", 50)),
-            difficulty_profile_path=diff.get("profile_path"),
+            difficulty_profile_path=(diff.get("profile_path") if isinstance(diff, dict) else None),
             learnable_weight=float(weights.get("learnable", 0.70)),
             easy_weight=float(weights.get("easy", 0.15)),
             hard_weight=float(weights.get("hard", 0.15)),
@@ -73,6 +82,14 @@ class GRPOTrainingConfig:
             max_consecutive_zero_variance_batches=int(
                 diff.get("max_consecutive_zero_variance_batches", 3)
             ),
+            domain=str(env.get("domain", "retail")),
+            rl_split=str(env.get("rl_split", "train")),
+            user_model=str(env.get("user_simulator", {}).get("model", "gpt-4.1-mini")),
+            user_temperature=float(env.get("user_simulator", {}).get("temperature", 0.7)),
+            temperature=float(t.get("temperature", 1.0)),
+            top_p=float(t.get("top_p", 0.95)),
+            use_vllm=bool(t.get("use_vllm", True)),
+            vllm_mode=str(t.get("vllm_mode", "colocate")),
         )
 
 
@@ -203,3 +220,116 @@ def resolve_resume_checkpoint(config: GRPOTrainingConfig) -> str | None:
     if not checkpoints:
         return None
     return str(checkpoints[-1])
+
+
+def weight_tasks_by_difficulty(
+    task_ids: list[str],
+    profile_path: str | None,
+    learnable_weight: float = 0.70,
+) -> list[str]:
+    """Repeats task IDs so learnable tasks occupy ~their weight of the pool."""
+    profile = load_difficulty_profile(profile_path)
+    if profile is None:
+        return list(task_ids)
+    buckets = {
+        "learnable": set(profile.learnable_tasks),
+        "easy": set(profile.easy_tasks),
+        "hard": set(profile.hard_tasks),
+    }
+    other_weight = (1.0 - learnable_weight) / 2.0
+    repeats = {
+        "learnable": max(1, round(learnable_weight * 10)),
+        "easy": max(1, round(other_weight * 10)),
+        "hard": max(1, round(other_weight * 10)),
+    }
+    weighted: list[str] = []
+    for tid in task_ids:
+        bucket = next((name for name, ids in buckets.items() if tid in ids), "easy")
+        weighted.extend([tid] * repeats.get(bucket, 1))
+    return weighted
+
+
+def run_grpo_training(
+    config: GRPOTrainingConfig,
+    max_steps: int | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Runs online multi-turn GRPO against official tau2 train tasks."""
+    from datasets import Dataset
+    from peft import LoraConfig
+    from transformers import AutoTokenizer
+    from trl import GRPOConfig, GRPOTrainer
+
+    from tau_research.tau.env_factory import TauEnvFactory
+    from tau_research.tau.grpo_rollout import make_tau_rollout_func, tau_outcome_reward
+
+    factory = TauEnvFactory(
+        domain=config.domain,
+        split=config.rl_split,
+        user_model=config.user_model,
+        user_temperature=config.user_temperature,
+    )
+
+    task_ids = factory.iter_task_ids()
+    weighted_ids = weight_tasks_by_difficulty(
+        task_ids, config.difficulty_profile_path, config.learnable_weight
+    )
+    summary: dict[str, Any] = {"train_tasks": len(task_ids), "weighted_rows": len(weighted_ids)}
+    if dry_run:
+        summary["dry_run"] = True
+        return summary
+
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    train_rows = [{"prompt": tid} for tid in weighted_ids]
+
+    rollout_func = make_tau_rollout_func(
+        tokenizer,
+        factory,
+        num_generations=config.num_generations,
+        max_turns=config.max_turns,
+        max_completion_tokens=config.max_completion_length,
+    )
+
+    grpo_kwargs: dict[str, Any] = dict(
+        output_dir=config.output_dir,
+        learning_rate=config.learning_rate,
+        num_generations=config.num_generations,
+        max_completion_length=config.max_completion_length,
+        beta=config.beta,
+        loss_type=config.loss_type,
+        temperature=config.temperature,
+        top_p=config.top_p,
+        seed=config.seed,
+        save_steps=config.save_steps,
+        gradient_accumulation_steps=16,
+        gradient_checkpointing=True,
+        bf16=True,
+        report_to=["wandb"],
+        use_vllm=config.use_vllm,
+        vllm_mode=config.vllm_mode,
+        vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,
+        vllm_enable_sleep_mode=config.vllm_enable_sleep_mode,
+        logging_steps=5,
+    )
+    if max_steps:
+        grpo_kwargs["max_steps"] = max_steps
+
+    trainer = GRPOTrainer(
+        model=config.model_name,
+        reward_funcs=[tau_outcome_reward],
+        args=GRPOConfig(**grpo_kwargs),
+        train_dataset=Dataset.from_list(train_rows),
+        rollout_func=rollout_func,
+        peft_config=LoraConfig(
+            r=16,
+            lora_alpha=32,
+            lora_dropout=0.0,
+            bias="none",
+            target_modules="all-linear",
+            task_type="CAUSAL_LM",
+        ),
+    )
+    trainer.train()
+    trainer.save_model(config.merged_dir)
+    summary["merged_dir"] = config.merged_dir
+    return summary

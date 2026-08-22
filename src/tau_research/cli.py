@@ -45,6 +45,14 @@ def main() -> None:
         "--dry-run", action="store_true", help="Load and render data only, no model load"
     )
 
+    # GRPO training
+    grpo_parser = subparsers.add_parser(
+        "train-grpo", help="Run online multi-turn GRPO on official tau2 train tasks"
+    )
+    grpo_parser.add_argument("--config", default="configs/grpo.yaml")
+    grpo_parser.add_argument("--max-steps", type=int, default=None)
+    grpo_parser.add_argument("--dry-run", action="store_true")
+
     # Evaluation
     eval_parser = subparsers.add_parser(
         "evaluate", help="Run multi-trial tau2 evaluation for a checkpoint"
@@ -89,6 +97,12 @@ def main() -> None:
         cfg = SFTTrainingConfig.from_yaml(args.config)
         summary = run_sft_training(cfg, max_steps=args.max_steps, dry_run=args.dry_run)
         print(json.dumps(summary, indent=2))
+    elif args.command == "train-grpo":
+        from tau_research.training.train_grpo import GRPOTrainingConfig, run_grpo_training
+
+        grpo_cfg = GRPOTrainingConfig.from_yaml(args.config)
+        grpo_summary = run_grpo_training(grpo_cfg, max_steps=args.max_steps, dry_run=args.dry_run)
+        print(json.dumps(grpo_summary, indent=2))
     elif args.command == "evaluate":
         from tau_research.evaluation.evaluate_tau import EvalRunConfig, evaluate_from_config
         from tau_research.tau.env_factory import TauEnvFactory
