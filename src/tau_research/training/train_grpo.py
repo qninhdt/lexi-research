@@ -35,6 +35,7 @@ class GRPOTrainingConfig:
     easy_weight: float = 0.15
     hard_weight: float = 0.15
     resample_on_zero_variance: bool = True
+    report_to: str = "none"
     max_consecutive_zero_variance_batches: int = 3
     domain: str = "retail"
     rl_split: str = "train"
@@ -79,6 +80,7 @@ class GRPOTrainingConfig:
             easy_weight=float(weights.get("easy", 0.15)),
             hard_weight=float(weights.get("hard", 0.15)),
             resample_on_zero_variance=bool(diff.get("resample_on_zero_variance", True)),
+            report_to=str(t.get("report_to", "none")),
             max_consecutive_zero_variance_batches=int(
                 diff.get("max_consecutive_zero_variance_batches", 3)
             ),
@@ -321,7 +323,7 @@ def run_grpo_training(
         gradient_accumulation_steps=16,
         gradient_checkpointing=True,
         bf16=True,
-        report_to=["wandb"],
+        report_to=[config.report_to] if config.report_to != "none" else [],
         use_vllm=config.use_vllm,
         vllm_mode=config.vllm_mode,
         vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,

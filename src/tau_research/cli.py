@@ -80,6 +80,9 @@ def main() -> None:
     )
     eval_parser.add_argument("--split", default=None, help="Override split (train/test)")
     eval_parser.add_argument("--limit", type=int, default=None, help="Only first N tasks")
+    eval_parser.add_argument(
+        "--num-trials", type=int, default=None, help="Override trials per task"
+    )
 
     args = parser.parse_args()
 
@@ -161,6 +164,8 @@ def main() -> None:
             eval_cfg.checkpoint_tag = args.tag
         if args.split:
             eval_cfg.split = args.split
+        if args.num_trials:
+            eval_cfg.num_trials = args.num_trials
 
         common: dict[str, Any] = dict(
             temperature=eval_cfg.temperature,

@@ -45,6 +45,7 @@ class SFTTrainingConfig:
     wandb_project: str = "tau-research"
     run_name: str = "qwen35-2b-sft-retail"
     merged_dir: str = "artifacts/models/qwen3.5-2b-tau-retail-sft-merged"
+    report_to: str = "none"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
@@ -82,6 +83,7 @@ class SFTTrainingConfig:
             seed=int(t.get("seed", 42)),
             wandb_project=str(w.get("project", "tau-research")),
             run_name=str(w.get("run_name", "qwen35-2b-sft-retail")),
+            report_to=str(t.get("report_to", "none")),
         )
 
 
@@ -236,7 +238,7 @@ def run_sft_training(
         gradient_checkpointing=config.gradient_checkpointing,
         bf16=config.bf16,
         seed=config.seed,
-        report_to=["wandb"],
+        report_to=[config.report_to] if config.report_to != "none" else [],
         run_name=config.run_name,
     )
     if max_steps:
