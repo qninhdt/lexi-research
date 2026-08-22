@@ -7,7 +7,7 @@ dataset:
   name: "inclusionAI/AReaL-tau2-data (sft split, retail, correct=1 & reward=1 & thinking non-empty)"
   train_path: "artifacts/data/areal_sft_train.json"
   val_path: "artifacts/data/areal_sft_val.json"
-  max_seq_length: 6144
+  max_seq_length: 8192
 
 lora:
   r: 16

@@ -30,7 +30,7 @@ class SFTTrainingConfig:
     bf16: bool
     train_path: str = "artifacts/data/areal_sft_train.json"
     val_path: str = "artifacts/data/areal_sft_val.json"
-    max_seq_length: int = 6144
+    max_seq_length: int = 8192
     enable_thinking: bool = True
     lora_r: int = 16
     lora_alpha: int = 32
@@ -68,7 +68,7 @@ class SFTTrainingConfig:
             bf16=bool(t.get("bf16", True)),
             train_path=str(d.get("train_path", "artifacts/data/areal_sft_train.json")),
             val_path=str(d.get("val_path", "artifacts/data/areal_sft_val.json")),
-            max_seq_length=int(d.get("max_seq_length", 6144)),
+            max_seq_length=int(d.get("max_seq_length", 8192)),
             enable_thinking=bool(m.get("enable_thinking", True)),
             lora_r=int(lora.get("r", 16)),
             lora_alpha=int(lora.get("lora_alpha", 32)),
