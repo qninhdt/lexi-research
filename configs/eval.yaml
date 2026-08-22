@@ -1,0 +1,22 @@
+evaluation:
+  benchmark: "sierra-research/tau2-bench"
+  version: "1.0.1"
+  domain: "retail"
+  split: "test"
+  num_trials: 4
+  max_agent_turns: 8
+
+decoding:
+  enable_thinking: true
+  temperature: 0.6
+  top_p: 0.95
+  top_k: 20
+  max_generated_tokens_per_turn: 1024
+
+user_simulator:
+  model: "gpt-4o-mini"
+  temperature: 0.7
+
+output:
+  results_file: "artifacts/evaluation/eval_results.jsonl"
+  summary_report: "artifacts/evaluation/eval_summary.md"

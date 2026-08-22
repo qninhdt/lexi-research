@@ -1,0 +1,205 @@
+"""Agentic Reinforcement Learning Pipeline with TRL GRPOTrainer and custom rollout_func."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+
+from tau_research.training.difficulty import (
+    DifficultyProfile,
+    sample_tasks_by_difficulty,
+)
+
+
+@dataclass
+class GRPOTrainingConfig:
+    model_name: str
+    output_dir: str
+    learning_rate: float
+    num_generations: int
+    max_completion_length: int
+    vllm_gpu_memory_utilization: float
+    vllm_enable_sleep_mode: bool
+    beta: float
+    loss_type: str = "dapo"
+    max_turns: int = 8
+    seed: int = 42
+    resume_from_checkpoint: str | None = None
+    save_steps: int = 50
+    difficulty_profile_path: str | None = None
+    learnable_weight: float = 0.70
+    easy_weight: float = 0.15
+    hard_weight: float = 0.15
+    resample_on_zero_variance: bool = True
+    max_consecutive_zero_variance_batches: int = 3
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "GRPOTrainingConfig":
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        m = data.get("model", {})
+        t = data.get("training", {})
+        env = data.get("environment", {})
+        diff = data.get("difficulty_sampling", {})
+        weights = diff.get("weights", {}) if isinstance(diff, dict) else {}
+
+        return cls(
+            model_name=m.get(
+                "name_or_path",
+                "artifacts/models/qwen3.5-2b-tau-retail-sft-merged",
+            ),
+            output_dir=t.get("output_dir", "artifacts/models/qwen3.5-2b-tau-retail-grpo"),
+            learning_rate=float(t.get("learning_rate", 1e-5)),
+            num_generations=int(t.get("num_generations", 4)),
+            max_completion_length=int(t.get("max_completion_length", 1536)),
+            vllm_gpu_memory_utilization=float(t.get("vllm_gpu_memory_utilization", 0.20)),
+            vllm_enable_sleep_mode=bool(t.get("vllm_enable_sleep_mode", True)),
+            beta=float(t.get("beta", 0.0)),
+            loss_type=str(t.get("loss_type", "dapo")),
+            max_turns=int(env.get("max_turns", 8)),
+            seed=int(t.get("seed", 42)),
+            resume_from_checkpoint=t.get("resume_from_checkpoint"),
+            save_steps=int(t.get("save_steps", 50)),
+            difficulty_profile_path=diff.get("profile_path"),
+            learnable_weight=float(weights.get("learnable", 0.70)),
+            easy_weight=float(weights.get("easy", 0.15)),
+            hard_weight=float(weights.get("hard", 0.15)),
+            resample_on_zero_variance=bool(diff.get("resample_on_zero_variance", True)),
+            max_consecutive_zero_variance_batches=int(
+                diff.get("max_consecutive_zero_variance_batches", 3)
+            ),
+        )
+
+
+def check_zero_variance_reward_batch(rewards: list[float]) -> bool:
+    """Returns True if reward standard deviation is 0.0 across generation group."""
+    if not rewards or len(rewards) <= 1:
+        return True
+    return float(np.std(rewards)) == 0.0
+
+
+def compute_group_advantages(rewards: list[float]) -> list[float]:
+    """Group-relative advantages: (r - mean) / (std + eps), matching GRPO."""
+    if not rewards:
+        return []
+    arr = np.asarray(rewards, dtype=np.float64)
+    mean = float(np.mean(arr))
+    std = float(np.std(arr))
+    denom = std if std > 1e-8 else 1.0
+    return [float((r - mean) / denom) for r in rewards]
+
+
+def format_rollout_batch_for_grpo(
+    prompt_ids: list[list[int]],
+    completion_ids: list[list[int]],
+    rewards: list[float],
+    logprobs: list[list[float]] | None = None,
+    advantages: list[float] | None = None,
+    returns: list[float] | None = None,
+) -> dict[str, Any]:
+    """Formats rollout episode tensors into the contract expected by GRPOTrainer.
+
+    Always includes TRL-required keys: prompt_ids, completion_ids, logprobs,
+    advantages, returns, and rewards.
+    """
+    n = len(rewards)
+    if n != len(prompt_ids) or n != len(completion_ids):
+        raise ValueError(
+            f"Batch length mismatch: prompts={len(prompt_ids)} "
+            f"completions={len(completion_ids)} rewards={n}"
+        )
+
+    if logprobs is None:
+        logprobs = [[0.0] * len(c) for c in completion_ids]
+    if advantages is None:
+        advantages = compute_group_advantages(rewards)
+    if returns is None:
+        returns = list(rewards)
+
+    if len(logprobs) != n or len(advantages) != n or len(returns) != n:
+        raise ValueError("logprobs/advantages/returns must match batch size")
+
+    return {
+        "prompt_ids": prompt_ids,
+        "completion_ids": completion_ids,
+        "logprobs": logprobs,
+        "advantages": advantages,
+        "returns": returns,
+        "rewards": rewards,
+    }
+
+
+def load_difficulty_profile(path: str | Path | None) -> DifficultyProfile | None:
+    if path is None:
+        return None
+    profile_path = Path(path)
+    if not profile_path.exists():
+        return None
+    import json
+
+    with open(profile_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return DifficultyProfile.from_dict(data)
+
+
+def select_training_tasks(
+    config: GRPOTrainingConfig,
+    batch_size: int,
+    fallback_task_ids: list[str] | None = None,
+    seed: int | None = None,
+) -> list[str]:
+    """Sample a GRPO batch with difficulty-weighted priority when a profile exists."""
+    profile = load_difficulty_profile(config.difficulty_profile_path)
+    if profile is None:
+        if not fallback_task_ids:
+            return []
+        rng = np.random.default_rng(seed if seed is not None else config.seed)
+        idx = rng.choice(len(fallback_task_ids), size=min(batch_size, len(fallback_task_ids)))
+        return [fallback_task_ids[int(i)] for i in idx]
+
+    return sample_tasks_by_difficulty(
+        profile,
+        batch_size=batch_size,
+        learnable_weight=config.learnable_weight,
+        easy_weight=config.easy_weight,
+        hard_weight=config.hard_weight,
+        seed=seed if seed is not None else config.seed,
+    )
+
+
+def build_grpo_trainer_kwargs(config: GRPOTrainingConfig) -> dict[str, Any]:
+    """Map config into TRL GRPOTrainer / TrainingArguments-compatible kwargs."""
+    kwargs: dict[str, Any] = {
+        "output_dir": config.output_dir,
+        "learning_rate": config.learning_rate,
+        "num_generations": config.num_generations,
+        "max_completion_length": config.max_completion_length,
+        "beta": config.beta,
+        "loss_type": config.loss_type,
+        "seed": config.seed,
+        "save_steps": config.save_steps,
+        "vllm_gpu_memory_utilization": config.vllm_gpu_memory_utilization,
+        "vllm_enable_sleep_mode": config.vllm_enable_sleep_mode,
+    }
+    if config.resume_from_checkpoint:
+        kwargs["resume_from_checkpoint"] = config.resume_from_checkpoint
+    return kwargs
+
+
+def resolve_resume_checkpoint(config: GRPOTrainingConfig) -> str | None:
+    """Return an existing checkpoint path for resume, or None."""
+    if config.resume_from_checkpoint:
+        path = Path(config.resume_from_checkpoint)
+        return str(path) if path.exists() else None
+    output = Path(config.output_dir)
+    if not output.exists():
+        return None
+    checkpoints = sorted(output.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime)
+    if not checkpoints:
+        return None
+    return str(checkpoints[-1])

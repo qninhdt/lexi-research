@@ -12,48 +12,33 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# The teacher response cache. Content-addressed provider payloads, including the
-# ones the validator rejected, so it is both large and the least reviewed text in
-# the tree. It is a resume aid, never an artifact: its hit rate is reported and
-# the parquet is what gets published.
-.cache/
-
 # Secrets / local config
 .env
 .env.*
 !.env.example
 
-# Data artifacts are DVC-tracked, never Git-tracked. Cambridge-derived text is
-# private (redistribution rights unverified).
-data/*
-!data/*.py
-!data/gec/
-!data/gec/*
-*.sqlite
-*.db
+# Third-party benchmark clone (pinned v1.0.1, restored via scripts/setup_colab.sh).
+# Vendoring a 1.1GB checkout into Git history is never worth it; the pin lives in
+# setup_colab.sh and pyproject [tool.uv.sources].
+third_party/
 
+# Generated training / eval artifacts. Regenerable from scripts; only split IDs
+# are tracked because they document the experiment protocol.
+artifacts/data/
+artifacts/models/
+artifacts/evaluation/
 
-# The DVC cache holds the content of every tracked artifact, so committing it
-# commits the data itself. W&I+LOCNESS is licensed for non-commercial research
-# and permits publishing excerpts of under 100 words only, so its converted rows
-# must not enter a Git remote. `.dvc/config` sets `no_scm`, which means DVC does
-# not write its own ignore file and this has to be stated here.
-.dvc/cache/
-.dvc/tmp/
-
-# Training / eval outputs
+# Experiment logging
+wandb/
+runs/
 outputs/
 checkpoints/
-wandb/
-# Generated eval reports at the repo root. Anchored with a leading slash: the
-# bare pattern also matched `plans/reports/`, which is written research rather
-# than generated output, and excluding it silently lost documented findings.
-/reports/
-# Adapter weights and run artifacts. Hundreds of MB of binaries that belong in
-# DVC or W&B artifacts, not in Git history.
-runs/
+scratch/
 
 # Local tool state
 .codegraph/
 .claude/
 .gemini/
+.agents/
+.agent/
+.repomixignore

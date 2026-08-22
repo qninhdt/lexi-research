@@ -1,124 +1,99 @@
 [project]
-name = "lexi-research"
+name = "tau-research"
 version = "0.1.0"
-description = "Distil a frontier sentence grader into a small local student model: dataset generation, QLoRA training, evaluation, and an OpenAI-compatible serving shim."
+description = "Specialized Business Customer-Service Assistant via SFT to Agentic RL on tau3-bench Retail"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.14"
 authors = [{ name = "qninhdt", email = "qndt123@gmail.com" }]
 dependencies = [
+    "accelerate>=1.0",
+    "datasets>=3",
     "jinja2>=3.1",
     "json-repair>=0.63.1",
-    "liger-kernel>=0.8.1",
-    "pyarrow>=17",
+    "peft>=0.14",
     "pydantic>=2.9",
     "pyyaml>=6",
+    "rich>=13.0",
+    "torch>=2.4.0",
+    "transformers>=4.48",
+    "trl>=0.12",
+    "wandb>=0.18",
+    "tau2",
 ]
+
+[tool.uv.sources]
+tau2 = { path = "third_party/tau2-bench", editable = true }
 
 [project.optional-dependencies]
 colab = [
-    "accelerate>=1.0",
     "bitsandbytes>=0.45",
-    "causal-conv1d @ https://github.com/astral-sh-build/build-causal-conv1d/releases/download/v1.6.2.post1-r2/causal_conv1d-1.6.2.post1%2Bcu.12.8.torch.2.11-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl ; python_version == '3.12' and sys_platform == 'linux'",
-    "datasets>=3",
     "flash-attn @ https://github.com/lesj0610/flash-attention/releases/download/v2.8.3-cu12-torch2.11/flash_attn-2.8.3%2Bcu12torch2.11cxx11abiTRUE-cp312-cp312-linux_x86_64.whl ; python_version == '3.12' and sys_platform == 'linux'",
-    "flash-linear-attention",
-    "peft>=0.14",
-    "torch>=2.11.0",
-    "torchvision",
-    "torchaudio",
-    "transformers>=4.48",
-    "trl>=0.12",
-    "wandb",
+    "vllm>=0.6.0",
 ]
-serve = ["fastapi>=0.115", "httpx>=0.27", "uvicorn>=0.30"]
-teacher = ["httpx>=0.27", "json-repair>=0.63.1", "langchain-openai>=0.3"]
 
 [project.scripts]
-lexi = "lexi_research.cli:main"
+tau-research = "tau_research.cli:main"
 
 [dependency-groups]
 dev = [
-    "dvc>=3.0",
-    "fastapi>=0.115",
-    "httpx>=0.27",
-    "json-repair>=0.63.1",
-    "langchain-openai>=0.3",
     "mypy>=1.11",
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.9",
     "types-PyYAML>=6",
-    "uvicorn>=0.30",
 ]
 smoke = [
     "accelerate>=1.0",
     "datasets>=3",
-    "peft>=0.13",
-    "torch>=2.4",
-    "transformers>=4.57",
+    "peft>=0.14",
+    "torch>=2.4.0",
+    "transformers>=4.48",
     "trl>=0.12",
 ]
 
-[tool.uv.sources]
-# Pin torch to the CPU wheels: this group exists to run two optimiser steps on a
-# tiny model, and the default index would pull ~2.5 GB of CUDA for nothing.
-torch = [{ index = "pytorch-cpu" }]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["lexi_research*", "bench*", "serve*"]
+where = ["src"]
+include = ["tau_research*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
+exclude = ["third_party"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
-files = ["lexi_research", "bench", "serve"]
+disallow_subclassing_any = false
+files = ["src/tau_research", "tests"]
 
-# pyarrow ships neither stubs nor a py.typed marker. Untyped is the upstream
-# state, not something this repo can fix, so the import is allowed through
-# rather than papered over with `type: ignore` at each call site.
-[[tool.mypy.overrides]]
-module = ["pyarrow.*"]
-ignore_missing_imports = true
-
-# The training stack is imported lazily and is absent from the CPU environment
-# CI type-checks in. Skipping it keeps one mypy result whether or not the
-# `smoke` group is installed — otherwise every lazy import would need an inline
-# ignore that becomes an error the moment someone installs the group.
 [[tool.mypy.overrides]]
 module = [
     "accelerate.*",
     "bitsandbytes.*",
     "datasets.*",
-    "liger_kernel.*",
     "peft.*",
     "tokenizers.*",
     "torch.*",
     "tqdm.*",
     "transformers.*",
     "trl.*",
+    "vllm.*",
     "wandb.*",
+    "tau2.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

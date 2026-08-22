@@ -1,13 +1,8 @@
-"""Shared fixtures for the format-core tests."""
-
-from __future__ import annotations
+"""Pytest fixtures for tau-research test suite."""
 
 import pytest
 
-from lexi_research.format import BandConfig, default_config_path
 
-
-@pytest.fixture(scope="session")
-def config() -> BandConfig:
-    """The `band_config.json` that ships with the repo."""
-    return BandConfig.from_json(default_config_path())
+@pytest.fixture
+def sample_retail_task_id() -> str:
+    return "retail_task_001"
