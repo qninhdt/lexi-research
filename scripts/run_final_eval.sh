@@ -1,65 +1,50 @@
 #!/usr/bin/env bash
+# Final held-out evaluation: Base vs SFT vs SFT+RL on official retail test split.
 set -euo pipefail
 
-POLICY_MODE="${POLICY_MODE:-dummy}"
-MODEL_PATH="${MODEL_PATH:-}"
-TASK_IDS="${TASK_IDS:-retail_test_001,retail_test_002}"
+BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3.5-2B}"
+SFT_MERGED="${SFT_MERGED:-artifacts/models/qwen3.5-2b-tau-retail-sft-merged}"
+RL_MERGED="${RL_MERGED:-artifacts/models/qwen3.5-2b-tau-retail-grpo-merged}"
+POLICY="${POLICY:-hf}"   # hf | vllm
 
-echo "=== [tau-research] Running Held-Out Test Evaluation (4 Trials / Task) ==="
-echo "Policy mode: ${POLICY_MODE}"
+run_eval () {
+    local tag="$1" path="$2"
+    echo "=== [tau-research] Evaluating ${tag}: ${path} ==="
+    uv run tau-research evaluate \
+        --config configs/eval.yaml \
+        --model-path "${path}" \
+        --tag "${tag}" \
+        --policy "${POLICY}"
+}
 
+run_eval base "${BASE_MODEL}"
+run_eval sft "${SFT_MERGED}"
+run_eval rl "${RL_MERGED}"
+
+echo "=== [tau-research] Comparing checkpoints (paired bootstrap deltas) ==="
 uv run python - <<'PY'
-import os
-from tau_research.evaluation.evaluate_tau import EvalRunConfig, evaluate_from_config
-from tau_research.tau.rollout import MockTauGymEnv
-from tau_research.evaluation.metrics import compute_paired_deltas, task_level_scores
+import json
+from pathlib import Path
 
-cfg = EvalRunConfig.from_yaml("configs/eval.yaml")
-print(
-    f"Evaluating {cfg.domain} domain on split {cfg.split} "
-    f"with {cfg.num_trials} trials/task, max_turns={cfg.max_agent_turns}."
-)
+from tau_research.evaluation.metrics import paired_bootstrap_delta, task_level_scores
 
-policy_mode = os.environ.get("POLICY_MODE", "dummy")
-model_path = os.environ.get("MODEL_PATH", "")
+def load(tag: str) -> dict[str, float]:
+    path = Path(f"artifacts/evaluation/{tag}/eval_results.jsonl")
+    per_task: dict[str, list[float]] = {}
+    for line in path.read_text().splitlines():
+        rec = json.loads(line)
+        per_task.setdefault(rec["task_id"], []).append(rec["reward"])
+    return task_level_scores(per_task)
 
-class DummyEvalPolicy:
-    def __init__(self) -> None:
-        self.step = 0
+base, sft, rl = load("base"), load("sft"), load("rl")
+d_sft = paired_bootstrap_delta(base, sft)
+d_rl = paired_bootstrap_delta(sft, rl)
+print(f"Delta SFT - Base : {d_sft['delta']:+.4f}  95% CI [{d_sft['ci_low']:+.4f}, {d_sft['ci_high']:+.4f}]")
+print(f"Delta RL  - SFT  : {d_rl['delta']:+.4f}  95% CI [{d_rl['ci_low']:+.4f}, {d_rl['ci_high']:+.4f}]")
 
-    def generate(self, history):
-        self.step += 1
-        if self.step % 2 == 1:
-            return "<think>Looking up order.</think>\ncall:cancel_order(order_id='100')"
-        return (
-            "<think>Order cancelled.</think>\n"
-            "Your order #100 has been cancelled successfully."
-        )
-
-if policy_mode == "dummy" or not model_path:
-    policy = DummyEvalPolicy()
-else:
-    # Placeholder for real HF policy loading when MODEL_PATH is set.
-    policy = DummyEvalPolicy()
-    print(f"Note: MODEL_PATH={model_path} provided; using DummyEvalPolicy until HF loader is wired.")
-
-task_ids = [t.strip() for t in os.environ.get("TASK_IDS", "retail_test_001,retail_test_002").split(",") if t.strip()]
-
-res = evaluate_from_config(
-    cfg,
-    task_ids=task_ids,
-    policy=policy,
-    env_factory=lambda task_id: MockTauGymEnv(task_id=task_id),
-)
-print("Evaluation Complete!")
-print(f"Pass^1 Success Rate: {res['pass_rate']:.2%}")
-print(f"95% CI (task-level): [{res['ci_95'][0]:.2%}, {res['ci_95'][1]:.2%}]")
-
-# Smoke paired-delta path with identical checkpoints (delta should be ~0).
-task_scores = task_level_scores(res["task_results"])
-d_sft, d_rl = compute_paired_deltas(task_scores, task_scores, task_scores)
-print(f"Paired deltas sanity (identical): delta_sft={d_sft:.4f}, delta_rl={d_rl:.4f}")
-assert abs(d_sft) < 1e-9 and abs(d_rl) < 1e-9
+summary = {"delta_sft": d_sft, "delta_rl": d_rl}
+Path("artifacts/evaluation/paired_deltas.json").write_text(json.dumps(summary, indent=2))
+print("Saved artifacts/evaluation/paired_deltas.json")
 PY
 
-echo "=== [tau-research] Evaluation Report Saved! ==="
+echo "=== [tau-research] Final evaluation complete ==="

@@ -1,6 +1,6 @@
 # tau-research
 
-> Specialized Business Customer-Service Assistant via SFT → Agentic Reinforcement Learning on $\tau^3$-bench Retail
+> Specialized Business Customer-Service Assistant via SFT → Agentic Reinforcement Learning on τ²-bench Retail
 
 [![CI](https://github.com/qninhdt/tau-research/actions/workflows/test.yml/badge.svg)](https://github.com/qninhdt/tau-research/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,75 +10,77 @@
 
 ## 1. Overview & Core Thesis
 
-**tau-research** specializes `Qwen/Qwen3.5-2B` into a stateful, tool-calling customer-service agent using turn-by-turn reasoning SFT and online multi-turn Agentic Reinforcement Learning with Hugging Face TRL and `tau2-bench` v1.0.1.
+**tau-research** specializes `Qwen/Qwen3.5-2B` into a stateful, tool-calling customer-service agent using reasoning SFT and online multi-turn Agentic RL (TRL GRPO), targeting the single thesis:
 
-Our empirical goal is demonstrating:
 $$\text{Base} < \text{SFT} < \text{SFT + Agentic RL}$$
-on the official held-out $\tau^3$-bench Retail test split using single-GPU compute (1 × NVIDIA L4 24GB on Google Colab Pro).
 
----
+on the official held-out τ²-bench Retail test split with single-GPU compute (1 × NVIDIA L4 24GB, Google Colab Pro).
 
-## 2. Key Architecture & Methodology
+## 2. Methodology
 
-- **Model**: `Qwen/Qwen3.5-2B` (BF16, LoRA, gradient checkpointing, vLLM colocate with sleep mode).
-- **Environment**: `sierra-research/tau2-bench` (pinned release `v1.0.1`), Retail domain.
-- **SFT Preprocessing**: Trajectories from `fuvty/tau-bench-synthetic` decomposed into per-turn conversational prompt-completion pairs; previous `<think>` traces are stripped from prompt history to match Qwen3.5 official chat template guidelines. `completion_only_loss = True`.
-- **Agentic RL**: Online multi-turn environment rollouts using TRL `GRPOTrainer` with custom `rollout_func`, outcome-based binary reward ($R = R_{\text{DB}} \times R_{\text{COMM}}$), and learnable task variance sampling.
-- **Evaluation**: 4 trials per task on held-out test split, reporting Pass$^1$ with 95% bootstrap confidence intervals, paired $\Delta_{\text{SFT}}$ & $\Delta_{\text{RL}}$, and 11-category error taxonomy.
-
----
+- **SFT data**: [`inclusionAI/AReaL-tau2-data`](https://huggingface.co/datasets/inclusionAI/AReaL-tau2-data) (Apache-2.0) — retail rows with verified success (`correct=1`, `reward=1.0`) and non-empty thinking traces, converted to per-turn prompt/completion records with a single canonical tool-call format.
+- **SFT**: TRL `SFTTrainer`, LoRA (r=16, all-linear), `completion_only_loss`, single-pass chat-template rendering so the completion is the exact inference-time suffix.
+- **RL**: TRL `GRPOTrainer` with a custom `rollout_func` running real `AgentGymEnv` episodes against the **official τ² Retail train split** (74 tasks). Agent tokens get policy loss; environment/user feedback tokens are masked out via TRL's `env_mask` path.
+- **User simulator**: frozen external API model (`gpt-4.1-mini`) for both RL rollouts and every evaluation — never swapped between checkpoints.
+- **Evaluation**: official Retail **test** split (40 tasks) × 4 trials; Pass¹ primary, Pass²/Pass⁴ secondary (leaderboard C(s,k)/C(n,k) convention), paired bootstrap 95% CIs for ΔSFT / ΔRL, 11-category error taxonomy.
 
 ## 3. Repository Structure
 
 ```text
 tau-research/
-├── configs/                   # Experiment configs (SFT, GRPO, Eval, Smoke)
-├── src/tau_research/          # Core Python package
-│   ├── data/                  # Dataset preparation, token profiling, splits
-│   ├── tau/                   # Gym environment integration, action parser, rewards
-│   ├── training/              # SFTTrainer, GRPOTrainer, LoRA merge, difficulty profiling
-│   ├── evaluation/            # Benchmark evaluator, bootstrap metrics, error taxonomy
-│   └── logging/               # W&B trajectory logger and custom metrics callbacks
-├── tests/                     # Test suite (TDD unit tests & mock rollouts)
-├── scripts/                   # Colab automation shell scripts
-└── ops/Makefile               # Quality gates (check, test, smoke)
+├── configs/                   # sft / grpo / eval / smoke experiment configs
+├── src/tau_research/
+│   ├── data/                  # AReaL converter, decontamination audit, validation
+│   ├── tau/                   # env factory, rollout loop, action parser, rewards, GRPO rollout_func
+│   ├── training/              # SFT trainer, GRPO trainer, difficulty profiler, adapter merge
+│   ├── evaluation/            # policy loaders, benchmark harness, metrics, error taxonomy
+│   └── logging/               # W&B callbacks and trajectory tables
+├── tests/                     # pytest suite (fixtures include real AReaL rows)
+├── scripts/                   # Colab automation (setup / smoke / sft / grpo / final eval)
+└── ops/Makefile               # quality gates (check, test, smoke)
 ```
 
----
+## 4. Quick Start
 
-## 4. Quick Start & Reproduction
-
-### Local Setup
+### Local checks
 ```bash
-# Clone and install dependencies
 uv sync --dev
-
-# Run quality checks
-make check
-
-# Run test suite
-make test
+make check   # ruff + mypy strict
+make test    # pytest
 ```
 
-### Google Colab Pro Setup (1 × L4 GPU)
+### Colab Pro pipeline (1 × L4)
 ```bash
-# Setup environment & third_party/tau2-bench
-bash scripts/setup_colab.sh
+bash scripts/setup_colab.sh          # env + third_party/tau2-bench v1.0.1
+bash scripts/smoke_test.sh           # CPU smoke gate
 
-# Run end-to-end smoke test
-bash scripts/smoke_test.sh
+# 1. SFT (downloads/converts AReaL data on first run)
+AREAL_JSONL=/path/to/tau2_sft_train.jsonl bash scripts/run_sft.sh
 
-# 1. Run SFT training and merge adapter
-bash scripts/run_sft.sh
-
-# 2. Run difficulty profiling & Agentic GRPO
+# 2. Difficulty profiling + GRPO
 bash scripts/run_grpo.sh
 
-# 3. Run final 4-trial evaluation
+# 3. Base vs SFT vs SFT+RL on held-out test split
 bash scripts/run_final_eval.sh
 ```
 
----
+### CLI
+```bash
+uv run tau-research convert-areal --input tau2_sft_train.jsonl
+uv run tau-research audit-decontamination --input tau2_sft_train.jsonl
+uv run tau-research train-sft --config configs/sft.yaml [--dry-run|--max-steps N]
+uv run tau-research profile-difficulty --model-path <sft-merged>
+uv run tau-research train-grpo --config configs/grpo.yaml [--dry-run]
+uv run tau-research evaluate --model-path <ckpt> --tag sft [--policy vllm]
+```
 
-## 5. License
-MIT License.
+## 5. Statistical Reporting
+
+The held-out test split has only 40 tasks, so single-number deltas are noisy.
+Final reports use paired per-task deltas with bootstrap CIs
+(`artifacts/evaluation/paired_deltas.json`) and Pass^k; expect ΔRL in the
++2–5pp range based on the AReaL paper's 30B results.
+
+## 6. License
+
+MIT License. SFT dataset: Apache-2.0 (AReaL-tau2-data). Benchmark: sierra-research/tau2-bench v1.0.1.

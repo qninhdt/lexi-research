@@ -45,6 +45,19 @@ def main() -> None:
         "--dry-run", action="store_true", help="Load and render data only, no model load"
     )
 
+    # Difficulty profiling
+    prof_parser = subparsers.add_parser(
+        "profile-difficulty",
+        help="Bucket official train tasks by empirical success of a policy",
+    )
+    prof_parser.add_argument("--model-path", required=True)
+    prof_parser.add_argument("--config", default="configs/grpo.yaml")
+    prof_parser.add_argument(
+        "--output", default="artifacts/splits/rl_train_difficulty_profile.json"
+    )
+    prof_parser.add_argument("--trials", type=int, default=4)
+    prof_parser.add_argument("--max-tasks", type=int, default=None)
+
     # GRPO training
     grpo_parser = subparsers.add_parser(
         "train-grpo", help="Run online multi-turn GRPO on official tau2 train tasks"
@@ -97,6 +110,27 @@ def main() -> None:
         cfg = SFTTrainingConfig.from_yaml(args.config)
         summary = run_sft_training(cfg, max_steps=args.max_steps, dry_run=args.dry_run)
         print(json.dumps(summary, indent=2))
+    elif args.command == "profile-difficulty":
+        from tau_research.evaluation.policies import HFChatPolicy
+        from tau_research.training.difficulty import profile_task_difficulty, summarize_profile
+        from tau_research.training.train_grpo import GRPOTrainingConfig
+        from tau_research.tau.env_factory import TauEnvFactory
+
+        grpo_cfg = GRPOTrainingConfig.from_yaml(args.config)
+        policy = HFChatPolicy(args.model_path)
+        factory = TauEnvFactory(
+            domain=grpo_cfg.domain,
+            split=grpo_cfg.rl_split,
+            user_model=grpo_cfg.user_model,
+            user_temperature=grpo_cfg.user_temperature,
+        )
+        task_ids = factory.iter_task_ids()
+        if args.max_tasks:
+            task_ids = task_ids[: args.max_tasks]
+
+        profile = profile_task_difficulty(policy, task_ids, factory, trials_per_task=args.trials)
+        profile.save(args.output)
+        print(f"Profile saved to {args.output}: {summarize_profile(profile)}")
     elif args.command == "train-grpo":
         from tau_research.training.train_grpo import GRPOTrainingConfig, run_grpo_training
 
