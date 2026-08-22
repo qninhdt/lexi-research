@@ -17,10 +17,7 @@ def calculate_pass_rate(task_results: dict[str, list[float]]) -> float:
 
 def task_level_scores(task_results: dict[str, list[float]]) -> dict[str, float]:
     """Mean score per task (for task-level bootstrap / paired deltas)."""
-    return {
-        tid: float(np.mean(trials)) if trials else 0.0
-        for tid, trials in task_results.items()
-    }
+    return {tid: float(np.mean(trials)) if trials else 0.0 for tid, trials in task_results.items()}
 
 
 def bootstrap_confidence_interval(

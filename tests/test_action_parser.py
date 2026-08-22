@@ -49,3 +49,21 @@ def test_parse_truncated_reasoning_fallback() -> None:
     assert parsed.is_truncated is True
     assert parsed.termination_reason == "truncation"
     assert parsed.is_tool_call is False
+
+
+def test_parse_legacy_json_args_form_round_trips() -> None:
+    """Legacy call:name({json}) targets must keep their argument values."""
+    from tau_research.tau.action_parser import parse_model_output
+
+    parsed = parse_model_output('call:get_order_details({"order_id":"#W4466964"})')
+    assert parsed.is_tool_call
+    assert parsed.tool_name == "get_order_details"
+    assert parsed.tool_args == {"order_id": "#W4466964"}
+    assert parsed.to_env_action() == "get_order_details(order_id='#W4466964')"
+
+
+def test_parse_functional_args_with_quotes_and_spaces() -> None:
+    from tau_research.tau.action_parser import parse_model_output
+
+    parsed = parse_model_output("find_user_by_name(name='Juan Lopez', zip='12345')")
+    assert parsed.tool_args == {"name": "Juan Lopez", "zip": "12345"}

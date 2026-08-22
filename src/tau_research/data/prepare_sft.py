@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -9,6 +10,11 @@ from typing import Any
 def strip_thinking_tags(text: str) -> str:
     """Removes <think>...</think> reasoning blocks from text."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def format_thinking_block(reasoning: str) -> str:
+    """Wraps a reasoning trace into a think block matching Qwen3.5 output format."""
+    return f"<think>\n{reasoning.strip()}\n</think>"
 
 
 def sanitize_history_for_turn(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -40,14 +46,23 @@ def format_assistant_message_content(msg: dict[str, Any]) -> str:
     if tool_calls and isinstance(tool_calls, list):
         for tc in tool_calls:
             fn = tc.get("function", {})
-            name = fn.get("name", "tool")
-            args = fn.get("arguments", "")
+            name = fn.get("name") or tc.get("name") or "tool"
+            args = fn.get("arguments") if isinstance(fn, dict) else None
+            if args is None:
+                args = tc.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, TypeError):
+                    pass
             if isinstance(args, dict):
                 from tau_research.tau.action_parser import format_functional_tool_call
 
                 parts.append(format_functional_tool_call(name, args))
             else:
-                parts.append(f"call:{name}({args})")
+                # Unparseable arguments: keep the call shape without inventing
+                # argument values that were never in the data.
+                parts.append(f"{name}()")
 
     return "\n".join(parts)
 

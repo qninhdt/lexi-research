@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ class GRPOTrainingConfig:
     max_consecutive_zero_variance_batches: int = 3
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "GRPOTrainingConfig":
+    def from_yaml(cls, path: str | Path) -> GRPOTrainingConfig:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 

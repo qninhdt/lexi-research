@@ -28,12 +28,10 @@ class EvalRunConfig:
     max_agent_turns: int
     temperature: float
     results_file: str
-    system_prompt: str = (
-        "You are a helpful customer service assistant for Retail operations."
-    )
+    system_prompt: str = "You are a helpful customer service assistant for Retail operations."
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "EvalRunConfig":
+    def from_yaml(cls, path: str | Path) -> EvalRunConfig:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
@@ -65,9 +63,7 @@ def evaluate_task_batch(
     num_trials: int = 4,
     results_path: str | Path = "artifacts/evaluation/eval_results.jsonl",
     max_agent_turns: int = 8,
-    system_prompt: str = (
-        "You are a helpful customer service assistant for Retail operations."
-    ),
+    system_prompt: str = ("You are a helpful customer service assistant for Retail operations."),
 ) -> dict[str, Any]:
     """Runs N trials across all task IDs and outputs structured summary stats."""
     from tau_research.tau.rollout import run_episode_rollout

@@ -4,11 +4,10 @@ model:
   enable_thinking: true
 
 dataset:
-  name: "fuvty/tau-bench-synthetic"
-  domain: "retail"
-  train_split_path: "artifacts/splits/sft_train_task_ids.json"
-  val_split_path: "artifacts/splits/sft_val_task_ids.json"
-  max_seq_length: 4096
+  name: "inclusionAI/AReaL-tau2-data (sft split, retail, correct=1 & reward=1 & thinking non-empty)"
+  train_path: "artifacts/data/areal_sft_train.json"
+  val_path: "artifacts/data/areal_sft_val.json"
+  max_seq_length: 6144
 
 lora:
   r: 16

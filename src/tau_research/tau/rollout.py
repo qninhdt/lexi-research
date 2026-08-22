@@ -106,9 +106,7 @@ def run_episode_rollout(
 
         cleaned_assistant_output = strip_thinking_tags(raw_output)
         # Prefer functional form in history so subsequent turns stay tau2-compatible.
-        history_assistant = (
-            action_payload if parsed.is_tool_call else cleaned_assistant_output
-        )
+        history_assistant = action_payload if parsed.is_tool_call else cleaned_assistant_output
         history.append({"role": "assistant", "content": history_assistant})
         if parsed.is_tool_call:
             history.append({"role": "tool", "content": obs})

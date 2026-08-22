@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -122,6 +121,36 @@ def _parse_scalar(raw: str) -> Any:
         return text
 
 
+def _parse_call_args(raw_args: str) -> dict[str, Any]:
+    """Parses a call argument string into a kwargs dict.
+
+    Accepts ``k=v`` pairs and a single JSON object (e.g. ``{"k": "v"}`` as
+    produced by legacy training formats), so a trained call string round-trips
+    without losing argument values.
+    """
+    args: dict[str, Any] = {}
+    stripped = raw_args.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        try:
+            data = json_repair.loads(stripped)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    for part in _split_top_level_args(raw_args):
+        if "=" in part:
+            key, _, value = part.partition("=")
+            args[key.strip()] = _parse_scalar(value)
+        elif part.strip().startswith("{"):
+            try:
+                data = json_repair.loads(part)
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                args.update(data)
+    return args
+
+
 def _extract_balanced_call(action_str: str) -> tuple[str, str] | None:
     """Find ``call:name(...)`` with balanced parentheses (supports nested parens in args)."""
     match = re.search(r"call:([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", action_str)
@@ -165,17 +194,12 @@ def parse_tool_string(action_str: str) -> tuple[str | None, dict[str, Any]]:
     call = _extract_balanced_call(action_str)
     if call is not None:
         fn_name, raw_args = call
-        args: dict[str, Any] = {}
-        if raw_args.strip():
-            for part in _split_top_level_args(raw_args):
-                if "=" not in part:
-                    continue
-                key, _, value = part.partition("=")
-                args[key.strip()] = _parse_scalar(value)
-        return fn_name, args
+        return fn_name, _parse_call_args(raw_args)
 
     # Pattern 1b: bare functional form name(k=v) (tau2 native)
-    bare = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)\s*$", action_str.strip(), flags=re.DOTALL)
+    bare = re.match(
+        r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)\s*$", action_str.strip(), flags=re.DOTALL
+    )
     if bare and bare.group(1) not in {"if", "for", "while", "return"}:
         fn_name = bare.group(1)
         raw_args = bare.group(2).strip()
@@ -183,14 +207,7 @@ def parse_tool_string(action_str: str) -> tuple[str | None, dict[str, Any]]:
         balanced = _extract_balanced_call(f"call:{action_str.strip()}")
         if balanced is not None:
             fn_name, raw_args = balanced
-        args = {}
-        if raw_args:
-            for part in _split_top_level_args(raw_args):
-                if "=" not in part:
-                    continue
-                key, _, value = part.partition("=")
-                args[key.strip()] = _parse_scalar(value)
-        return fn_name, args
+        return fn_name, _parse_call_args(raw_args)
 
     # Pattern 2: JSON block ```json {"name": "...", "arguments": {...}} ```
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", action_str, flags=re.DOTALL)
@@ -238,6 +255,38 @@ def parse_model_output(output_text: str) -> ParsedAction:
             reasoning=reasoning,
             is_truncated=True,
             termination_reason="truncation",
+        )
+
+    # Generation can start INSIDE the think block when enable_thinking renders
+    # an opening "<think>\n" before sampling; only the closing tag appears.
+    if "</think>" in output_text and "<think>" not in output_text:
+        reasoning_part, _, action_text = output_text.partition("</think>")
+        reasoning = reasoning_part.strip()
+        action_text = action_text.strip()
+        if not action_text:
+            return ParsedAction(
+                raw_text=output_text,
+                reasoning=reasoning,
+                is_truncated=True,
+                termination_reason="empty_action",
+            )
+        tool_name, tool_args = parse_tool_string(action_text)
+        if tool_name:
+            return ParsedAction(
+                raw_text=output_text,
+                reasoning=reasoning,
+                is_tool_call=True,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                message=action_text,
+            )
+        return ParsedAction(
+            raw_text=output_text,
+            reasoning=reasoning,
+            is_tool_call=False,
+            tool_name=None,
+            tool_args={},
+            message=action_text,
         )
 
     # Extract thinking content

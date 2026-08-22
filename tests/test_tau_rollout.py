@@ -6,7 +6,7 @@ from tau_research.tau.rollout import MockTauGymEnv, run_episode_rollout
 
 
 class DummyPolicy:
-    """Dummy policy that returns a tool call on turn 1 and final message on turn 2."""
+    """Dummy policy that cancels the order on turn 1 and sends a final message on turn 2."""
 
     def __init__(self) -> None:
         self.call_count = 0
@@ -14,7 +14,7 @@ class DummyPolicy:
     def generate(self, history: list[dict[str, Any]]) -> str:
         self.call_count += 1
         if self.call_count == 1:
-            return "<think>Look up order.</think>\ncall:get_order(order_id='100')"
+            return "<think>Cancelling order.</think>\ncall:cancel_order(order_id='100')"
         return "<think>Done.</think>\nYour order #100 is resolved."
 
 
