@@ -46,6 +46,7 @@ class SFTTrainingConfig:
     run_name: str = "qwen35-2b-sft-retail"
     merged_dir: str = "artifacts/models/qwen3.5-2b-tau-retail-sft-merged"
     report_to: str = "none"
+    max_steps: int | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
@@ -84,6 +85,7 @@ class SFTTrainingConfig:
             wandb_project=str(w.get("project", "tau-research")),
             run_name=str(w.get("run_name", "qwen35-2b-sft-retail")),
             report_to=str(t.get("report_to", "none")),
+            max_steps=(int(t["max_steps"]) if t.get("max_steps") is not None else None),
         )
 
 
@@ -169,6 +171,8 @@ def run_sft_training(
     max_steps: int | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    """CLI ``--max-steps`` overrides the yaml value when provided."""
+    effective_max_steps = max_steps if max_steps is not None else config.max_steps
     """Runs LoRA reasoning SFT with TRL SFTTrainer and merges the final adapter.
 
     Returns a summary dict with example counts, skip counts, and output paths.
@@ -228,7 +232,7 @@ def run_sft_training(
         learning_rate=config.learning_rate,
         lr_scheduler_type=config.lr_scheduler_type,
         warmup_ratio=config.warmup_ratio,
-        num_train_epochs=max_steps if max_steps else config.num_train_epochs,
+        num_train_epochs=effective_max_steps or config.num_train_epochs,
         logging_steps=config.logging_steps,
         eval_strategy="steps",
         eval_steps=config.eval_steps,
@@ -241,10 +245,10 @@ def run_sft_training(
         report_to=[config.report_to] if config.report_to != "none" else [],
         run_name=config.run_name,
     )
-    if max_steps:
+    if effective_max_steps:
         # Explicit step budget replaces the epoch schedule for smoke runs.
         del sft_kwargs["num_train_epochs"]
-        sft_kwargs["max_steps"] = max_steps
+        sft_kwargs["max_steps"] = effective_max_steps
 
     training_args = SFTConfig(**sft_kwargs)
     trainer = SFTTrainer(
