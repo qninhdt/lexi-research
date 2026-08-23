@@ -48,6 +48,8 @@ class SFTTrainingConfig:
     report_to: str = "none"
     max_steps: int | None = None
     eval_strategy: str = "no"
+    attn_implementation: str = "sdpa"
+    packing: bool = False
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
@@ -88,6 +90,8 @@ class SFTTrainingConfig:
             report_to=str(t.get("report_to", "none")),
             max_steps=(int(t["max_steps"]) if t.get("max_steps") is not None else None),
             eval_strategy=str(t.get("eval_strategy", "no")),
+            attn_implementation=str(m.get("attn_implementation", "sdpa")),
+            packing=bool(t.get("packing", False)),
         )
 
 
@@ -212,6 +216,7 @@ def run_sft_training(
     model = AutoModelForCausalLM.from_pretrained(
         config.model_name,
         dtype=torch.bfloat16 if config.bf16 else torch.float32,
+        attn_implementation=config.attn_implementation,
     )
     model.config.use_cache = False
 
@@ -228,7 +233,7 @@ def run_sft_training(
         output_dir=config.output_dir,
         max_length=config.max_seq_length,
         completion_only_loss=True,
-        packing=False,
+        packing=config.packing,
         per_device_train_batch_size=config.per_device_train_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
