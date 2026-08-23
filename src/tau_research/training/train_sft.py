@@ -50,12 +50,17 @@ class SFTTrainingConfig:
     eval_strategy: str = "no"
     attn_implementation: str = "sdpa"
     packing: bool = False
+    use_liger_kernel: bool = False
+    tf32: bool = True
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> SFTTrainingConfig:
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            return cls.from_dict(yaml.safe_load(f) or {})
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SFTTrainingConfig:
+        """Builds the config from an already-parsed (and override-applied) YAML dict."""
         m = data.get("model", {})
         t = data.get("training", {})
         d = data.get("dataset", {})
@@ -92,6 +97,8 @@ class SFTTrainingConfig:
             eval_strategy=str(t.get("eval_strategy", "no")),
             attn_implementation=str(m.get("attn_implementation", "sdpa")),
             packing=bool(t.get("packing", False)),
+            use_liger_kernel=bool(t.get("use_liger_kernel", False)),
+            tf32=bool(t.get("tf32", True)),
         )
 
 
@@ -264,6 +271,8 @@ def run_sft_training(
         save_total_limit=config.save_total_limit,
         gradient_checkpointing=config.gradient_checkpointing,
         bf16=config.bf16,
+        use_liger_kernel=config.use_liger_kernel,
+        tf32=config.tf32,
         seed=config.seed,
         report_to=[config.report_to] if config.report_to != "none" else [],
         run_name=config.run_name,

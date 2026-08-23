@@ -41,7 +41,10 @@ class EvalRunConfig:
     @classmethod
     def from_yaml(cls, path: str | Path) -> EvalRunConfig:
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            return cls.from_dict(yaml.safe_load(f) or {})
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunConfig:
 
         ev = data.get("evaluation", {})
         dec = data.get("decoding", {})

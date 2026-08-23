@@ -49,6 +49,16 @@ def main() -> None:
         action="store_true",
         help="Continue from the newest checkpoint in output_dir if present",
     )
+    sft_parser.add_argument("--train", default=None, help="Override dataset.train_path")
+    sft_parser.add_argument("--val", default=None, help="Override dataset.val_path")
+    sft_parser.add_argument("--output", default=None, help="Override training.output_dir")
+    sft_parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override any yaml field, e.g. --override train.packing=false",
+    )
 
     # Difficulty profiling
     prof_parser = subparsers.add_parser(
@@ -70,6 +80,13 @@ def main() -> None:
     grpo_parser.add_argument("--config", default="configs/grpo.yaml")
     grpo_parser.add_argument("--max-steps", type=int, default=None)
     grpo_parser.add_argument("--dry-run", action="store_true")
+    grpo_parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override any yaml field",
+    )
 
     # Evaluation
     eval_parser = subparsers.add_parser(
@@ -87,6 +104,13 @@ def main() -> None:
     eval_parser.add_argument("--limit", type=int, default=None, help="Only first N tasks")
     eval_parser.add_argument(
         "--num-trials", type=int, default=None, help="Override trials per task"
+    )
+    eval_parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="SECTION.KEY=VALUE",
+        help="Override any yaml field",
     )
 
     args = parser.parse_args()
@@ -126,9 +150,21 @@ def main() -> None:
             f"{report['official_test_tasks']} test tasks: {flagged} flagged pairs -> {out_path}"
         )
     elif args.command == "train-sft":
+        import yaml
+
+        from tau_research.config_overrides import apply_overrides
         from tau_research.training.train_sft import SFTTrainingConfig, run_sft_training
 
-        cfg = SFTTrainingConfig.from_yaml(args.config)
+        with open(args.config, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        if args.train:
+            data.setdefault("dataset", {})["train_path"] = args.train
+        if args.val:
+            data.setdefault("dataset", {})["val_path"] = args.val
+        if args.output:
+            data.setdefault("training", {})["output_dir"] = args.output
+        data = apply_overrides(data, args.override)
+        cfg = SFTTrainingConfig.from_dict(data)
         summary = run_sft_training(
             cfg, max_steps=args.max_steps, dry_run=args.dry_run, resume=args.resume
         )
@@ -157,16 +193,28 @@ def main() -> None:
         profile.save(args.output)
         print(f"Profile saved to {args.output}: {summarize_profile(profile)}")
     elif args.command == "train-grpo":
+        import yaml as _yaml
+
+        from tau_research.config_overrides import apply_overrides as _apply
         from tau_research.training.train_grpo import GRPOTrainingConfig, run_grpo_training
 
-        grpo_cfg = GRPOTrainingConfig.from_yaml(args.config)
+        with open(args.config, encoding="utf-8") as f:
+            _data = _yaml.safe_load(f) or {}
+        _data = _apply(_data, args.override)
+        grpo_cfg = GRPOTrainingConfig.from_dict(_data)
         grpo_summary = run_grpo_training(grpo_cfg, max_steps=args.max_steps, dry_run=args.dry_run)
         print(json.dumps(grpo_summary, indent=2))
     elif args.command == "evaluate":
+        import yaml as _yeval
+
+        from tau_research.config_overrides import apply_overrides as _apply_eval
         from tau_research.evaluation.evaluate_tau import EvalRunConfig, evaluate_from_config
         from tau_research.tau.env_factory import TauEnvFactory
 
-        eval_cfg = EvalRunConfig.from_yaml(args.config)
+        with open(args.config, encoding="utf-8") as f:
+            _edata = _yeval.safe_load(f) or {}
+        _edata = _apply_eval(_edata, args.override)
+        eval_cfg = EvalRunConfig.from_dict(_edata)
         if args.tag:
             eval_cfg.checkpoint_tag = args.tag
         if args.split:

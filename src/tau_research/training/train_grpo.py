@@ -50,7 +50,10 @@ class GRPOTrainingConfig:
     @classmethod
     def from_yaml(cls, path: str | Path) -> GRPOTrainingConfig:
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            return cls.from_dict(yaml.safe_load(f) or {})
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GRPOTrainingConfig:
 
         m = data.get("model", {})
         t = data.get("training", {})
