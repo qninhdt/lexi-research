@@ -1,63 +1,56 @@
 model:
-  name_or_path: "artifacts/models/qwen3.5-2b-tau-retail-sft-merged"
-  torch_dtype: "bfloat16"
+  name_or_path: artifacts/models/qwen3.5-2b-tau-retail-sft-merged
+  torch_dtype: bfloat16
   enable_thinking: true
-
 lora:
   r: 16
   lora_alpha: 32
   lora_dropout: 0.0
-  bias: "none"
-  target_modules: "all-linear"
-  task_type: "CAUSAL_LM"
-
+  bias: none
+  target_modules: all-linear
+  task_type: CAUSAL_LM
 environment:
-  benchmark: "sierra-research/tau2-bench"
-  version: "1.0.1"
-  domain: "retail"
-  rl_split: "train"
+  benchmark: sierra-research/tau2-bench
+  version: 1.0.1
+  domain: retail
+  rl_split: train
   solo_mode: false
   user_simulator:
-    model: "gpt-4.1-mini"
+    model: openai/qwen3.8
     temperature: 0.7
   max_turns: 8
-
 difficulty_sampling:
-  profile_path: "artifacts/splits/rl_train_difficulty_profile.json"
+  profile_path: artifacts/splits/rl_train_difficulty_profile.json
   weights:
-    learnable: 0.70
+    learnable: 0.7
     easy: 0.15
     hard: 0.15
   resample_on_zero_variance: true
   max_consecutive_zero_variance_batches: 3
-
 training:
-  output_dir: "artifacts/models/qwen3.5-2b-tau-retail-grpo"
+  output_dir: artifacts/models/qwen3.5-2b-tau-retail-grpo
   bf16: true
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 16
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-05
   num_generations: 4
-  # Episode-level budget: completion spans ALL agent turns of a rollout,
-  # not a single generation (measured episodes are ~2-4k agent tokens).
   max_completion_length: 4096
   gradient_checkpointing: true
-  loss_type: "dapo"
+  loss_type: dapo
   beta: 0.0
   use_vllm: true
-  vllm_mode: "colocate"
+  vllm_mode: colocate
   temperature: 1.0
   top_p: 0.95
-  vllm_gpu_memory_utilization: 0.20
+  vllm_gpu_memory_utilization: 0.2
   vllm_enable_sleep_mode: true
   logging_steps: 5
-  save_strategy: "steps"
+  save_strategy: steps
   save_steps: 50
   save_total_limit: 2
-  report_to: "wandb"
+  report_to: wandb
   seed: 42
   resume_from_checkpoint: null
-
 wandb:
-  project: "tau-research"
-  run_name: "qwen35-2b-grpo-retail"
+  project: tau-research
+  run_name: qwen35-2b-grpo-retail
