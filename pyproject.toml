@@ -41,7 +41,6 @@ colab = [
     "torch>=2.11.0,<2.12",
     "torchvision>=0.16,<0.27",
     "torchaudio",
-    "torchaudio",
     "transformers>=4.48",
     "trl>=0.12",
     "wandb",
