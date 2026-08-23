@@ -155,7 +155,10 @@ def prepare_sft_dataset_for_trainer(
     cannot be rendered (e.g. no user query yet) are skipped.
     """
     formatted: list[dict[str, str]] = []
-    for ex in raw_examples:
+    total = len(raw_examples)
+    for i, ex in enumerate(raw_examples, 1):
+        if i % 1000 == 0 or i == total:
+            print(f"[train-sft] rendering prompt/completion {i}/{total}", flush=True)
         prompt_msgs = list(ex["prompt"])
         completion_msgs = list(ex["completion"])
         try:
