@@ -95,6 +95,18 @@ class SFTTrainingConfig:
         )
 
 
+def find_latest_checkpoint(output_dir: str | Path) -> str | None:
+    """Returns the newest ``checkpoint-N`` directory inside output_dir, if any."""
+    import re
+
+    candidates: list[tuple[int, str]] = []
+    for p in Path(output_dir).glob("checkpoint-*"):
+        m = re.fullmatch(r"checkpoint-(\d+)", p.name)
+        if m and p.is_dir():
+            candidates.append((int(m.group(1)), str(p)))
+    return max(candidates)[1] if candidates else None
+
+
 def load_sft_examples(path: str | Path) -> list[dict[str, Any]]:
     """Loads jsonl prompt/completion records produced by the AReaL converter."""
     examples: list[dict[str, Any]] = []
@@ -176,6 +188,7 @@ def run_sft_training(
     config: SFTTrainingConfig,
     max_steps: int | None = None,
     dry_run: bool = False,
+    resume: bool = False,
 ) -> dict[str, Any]:
     """CLI ``--max-steps`` overrides the yaml value when provided."""
     effective_max_steps = max_steps if max_steps is not None else config.max_steps
@@ -280,7 +293,10 @@ def run_sft_training(
         )
     summary["train_after_length_filter"] = kept
 
-    trainer.train()
+    resume_path = find_latest_checkpoint(config.output_dir) if resume else None
+    if resume and resume_path:
+        print(f"[train-sft] resuming from {resume_path}")
+    trainer.train(resume_from_checkpoint=resume_path)
     adapter_dir = Path(config.output_dir) / "final-adapter"
     trainer.save_model(str(adapter_dir))
 

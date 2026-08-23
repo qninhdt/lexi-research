@@ -44,6 +44,11 @@ def main() -> None:
     sft_parser.add_argument(
         "--dry-run", action="store_true", help="Load and render data only, no model load"
     )
+    sft_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue from the newest checkpoint in output_dir if present",
+    )
 
     # Difficulty profiling
     prof_parser = subparsers.add_parser(
@@ -124,7 +129,9 @@ def main() -> None:
         from tau_research.training.train_sft import SFTTrainingConfig, run_sft_training
 
         cfg = SFTTrainingConfig.from_yaml(args.config)
-        summary = run_sft_training(cfg, max_steps=args.max_steps, dry_run=args.dry_run)
+        summary = run_sft_training(
+            cfg, max_steps=args.max_steps, dry_run=args.dry_run, resume=args.resume
+        )
         print(json.dumps(summary, indent=2))
     elif args.command == "profile-difficulty":
         from tau_research.evaluation.policies import HFChatPolicy
